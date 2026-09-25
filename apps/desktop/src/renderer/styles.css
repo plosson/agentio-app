@@ -1,3 +1,4 @@
+/* Design system: see docs/design/ (tokens.css + guidelines). Migrate off slate/sky onto those tokens. */
 :root {
   color-scheme: dark;
   --bg: #0f172a;

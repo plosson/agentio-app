@@ -1,0 +1,213 @@
+/**
+ * AgentIO Companion — design tokens
+ * Source of truth: docs/design/*.md
+ *
+ * Import into the desktop renderer and migrate apps/desktop/src/renderer/styles.css
+ * off the old slate (#0f172a/#1e293b) + sky (#38bdf8) palette onto these variables.
+ *
+ *   @import url("./tokens.css");
+ *   /* or copy beside styles.css once packaging requires a local path */
+ */
+
+:root {
+  color-scheme: light;
+
+  /* —— Color (light) —— */
+  --color-bg: #f5f5f7;
+  --color-bg-elevated: #ffffff;
+  --color-bg-subtle: #e8e8ed;
+  --color-border: #d2d2d7;
+  --color-border-strong: #a1a1a6;
+  --color-text: #1d1d1f;
+  --color-text-secondary: #6e6e73;
+  --color-text-tertiary: #8e8e93;
+  --color-accent: #0f766e;
+  --color-accent-muted: #e6f4f2;
+  --color-accent-fg: #ffffff;
+  --color-danger: #dc2626;
+  --color-danger-muted: #fee2e2;
+  --color-ok: #16a34a;
+  --color-ok-muted: #dcfce7;
+  --color-focus-ring: #0f766e;
+  --color-selection: rgba(15, 118, 110, 0.18);
+  --color-tip-bg: #eef0f4;
+  --color-progress-track: #e5e5ea;
+  --color-progress-fill: #0f766e;
+  --color-overlay: rgba(0, 0, 0, 0.36);
+
+  /* Primary CTA uses text-on-inverted mapping */
+  --color-cta-bg: var(--color-text);
+  --color-cta-fg: #ffffff;
+
+  /* —— Typography —— */
+  --font-sans: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", system-ui, Helvetica, Arial, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, Monaco, "Cascadia Code",
+    "Roboto Mono", Consolas, "Liberation Mono", monospace;
+
+  --text-display: 1.75rem; /* 28px */
+  --text-display-lh: 1.25;
+  --text-display-tracking: -0.02em;
+
+  --text-title: 1.25rem; /* 20px */
+  --text-title-lh: 1.3;
+  --text-title-tracking: -0.015em;
+
+  --text-body: 0.875rem; /* 14px */
+  --text-body-lh: 1.5;
+
+  --text-caption: 0.75rem; /* 12px */
+  --text-caption-lh: 1.4;
+  --text-caption-tracking: 0.01em;
+
+  --text-mono: 0.8125rem; /* 13px */
+  --text-mono-lh: 1.4;
+
+  --text-mono-display: 2rem; /* 32px */
+  --text-mono-display-lh: 1.2;
+  --text-mono-display-tracking: 0.08em;
+
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  /* —— Spacing (4px grid) —— */
+  --space-0: 0;
+  --space-1: 0.25rem; /* 4px */
+  --space-2: 0.5rem; /* 8px */
+  --space-3: 0.75rem; /* 12px */
+  --space-4: 1rem; /* 16px */
+  --space-5: 1.25rem; /* 20px */
+  --space-6: 1.5rem; /* 24px */
+  --space-7: 2rem; /* 32px */
+  --space-8: 2.5rem; /* 40px */
+  --space-9: 3rem; /* 48px */
+  --space-10: 4rem; /* 64px */
+
+  /* —— Layout —— */
+  --layout-column: 420px;
+  --layout-column-padding-x: var(--space-6);
+  --vault-bar-height: 40px;
+  --window-min-width-onboarding: 480px;
+  --window-min-height-onboarding: 560px;
+  --window-min-width-vault: 900px;
+  --window-min-height-vault: 640px;
+
+  /* —— Radii & borders —— */
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-pill: 999px;
+  --radius-window: 0;
+  --radius-progress: 4px;
+  --border-width: 1px;
+  --border-width-strong: 1.5px;
+
+  /* —— Icons & controls —— */
+  --icon-sm: 14px;
+  --icon-md: 16px;
+  --icon-lg: 24px;
+  --icon-xl: 40px;
+  --icon-spinner: 20px;
+  --control-height: 40px;
+  --hit-target-min: 32px;
+  --hit-target-comfy: 44px;
+  --progress-height: 6px;
+
+  /* —— Motion —— */
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 320ms;
+  --motion-spinner: 700ms;
+  --motion-indeterminate: 1200ms;
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --color-bg: #1c1c1e;
+    --color-bg-elevated: #2c2c2e;
+    --color-bg-subtle: #232326;
+    --color-border: #3a3a3c;
+    --color-border-strong: #636366;
+    --color-text: #f5f5f7;
+    --color-text-secondary: #a1a1a6;
+    --color-text-tertiary: #8e8e93;
+    --color-accent: #2dd4bf;
+    --color-accent-muted: #134e4a;
+    --color-accent-fg: #042f2e;
+    --color-danger: #f87171;
+    --color-danger-muted: #450a0a;
+    --color-ok: #4ade80;
+    --color-ok-muted: #052e16;
+    --color-focus-ring: #2dd4bf;
+    --color-selection: rgba(45, 212, 191, 0.28);
+    --color-tip-bg: #2a2a2e;
+    --color-progress-track: #3a3a3c;
+    --color-progress-fill: #2dd4bf;
+    --color-overlay: rgba(0, 0, 0, 0.56);
+
+    --color-cta-bg: var(--color-text);
+    --color-cta-fg: #1c1c1e;
+  }
+}
+
+/* Explicit theme override (Electron / settings). Mirrors dark media query. */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #1c1c1e;
+  --color-bg-elevated: #2c2c2e;
+  --color-bg-subtle: #232326;
+  --color-border: #3a3a3c;
+  --color-border-strong: #636366;
+  --color-text: #f5f5f7;
+  --color-text-secondary: #a1a1a6;
+  --color-text-tertiary: #8e8e93;
+  --color-accent: #2dd4bf;
+  --color-accent-muted: #134e4a;
+  --color-accent-fg: #042f2e;
+  --color-danger: #f87171;
+  --color-danger-muted: #450a0a;
+  --color-ok: #4ade80;
+  --color-ok-muted: #052e16;
+  --color-focus-ring: #2dd4bf;
+  --color-selection: rgba(45, 212, 191, 0.28);
+  --color-tip-bg: #2a2a2e;
+  --color-progress-track: #3a3a3c;
+  --color-progress-fill: #2dd4bf;
+  --color-overlay: rgba(0, 0, 0, 0.56);
+
+  --color-cta-bg: var(--color-text);
+  --color-cta-fg: #1c1c1e;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --color-bg: #f5f5f7;
+  --color-bg-elevated: #ffffff;
+  --color-bg-subtle: #e8e8ed;
+  --color-border: #d2d2d7;
+  --color-border-strong: #a1a1a6;
+  --color-text: #1d1d1f;
+  --color-text-secondary: #6e6e73;
+  --color-text-tertiary: #8e8e93;
+  --color-accent: #0f766e;
+  --color-accent-muted: #e6f4f2;
+  --color-accent-fg: #ffffff;
+  --color-danger: #dc2626;
+  --color-danger-muted: #fee2e2;
+  --color-ok: #16a34a;
+  --color-ok-muted: #dcfce7;
+  --color-focus-ring: #0f766e;
+  --color-selection: rgba(15, 118, 110, 0.18);
+  --color-tip-bg: #eef0f4;
+  --color-progress-track: #e5e5ea;
+  --color-progress-fill: #0f766e;
+  --color-overlay: rgba(0, 0, 0, 0.36);
+
+  --color-cta-bg: var(--color-text);
+  --color-cta-fg: #ffffff;
+}
