@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { CompanionConfig, OnboardingScreen } from "../shared/types";
+import type {
+  CliStatus,
+  CompanionConfig,
+  LoginCode,
+  OnboardingScreen,
+  VaultState,
+} from "../shared/types";
 
 /**
  * Option A bridge for the remote vault /ui page.
@@ -26,17 +32,43 @@ contextBridge.exposeInMainWorld("agentioOnboarding", {
   setVaultUrl(url: string, remember: boolean): Promise<void> {
     return ipcRenderer.invoke("onboarding:setVaultUrl", url, remember);
   },
+  cliStatus(): Promise<CliStatus> {
+    return ipcRenderer.invoke("onboarding:cliStatus");
+  },
   startCliInstall(): Promise<void> {
     return ipcRenderer.invoke("onboarding:startCliInstall");
   },
-  skipCliUsePath(): Promise<void> {
-    return ipcRenderer.invoke("onboarding:skipCliUsePath");
+  continueWithCli(): Promise<void> {
+    return ipcRenderer.invoke("onboarding:continueWithCli");
   },
-  unlockStub(passphrase: string): Promise<{ ok: boolean; error?: string }> {
-    return ipcRenderer.invoke("onboarding:unlockStub", passphrase);
+  vaultState(): Promise<VaultState> {
+    return ipcRenderer.invoke("onboarding:vaultState");
   },
-  openVault(): Promise<void> {
-    return ipcRenderer.invoke("onboarding:openVault");
+  startLogin(): Promise<void> {
+    return ipcRenderer.invoke("onboarding:startLogin");
+  },
+  openApproval(): Promise<void> {
+    return ipcRenderer.invoke("onboarding:openApproval");
+  },
+  cancelLogin(): Promise<void> {
+    return ipcRenderer.invoke("onboarding:cancelLogin");
+  },
+  onLoginCode(cb: (code: LoginCode) => void): () => void {
+    const handler = (_e: Electron.IpcRendererEvent, code: LoginCode) => cb(code);
+    ipcRenderer.on("onboarding:loginCode", handler);
+    return () => ipcRenderer.removeListener("onboarding:loginCode", handler);
+  },
+  createLocalVault(passphrase: string): Promise<void> {
+    return ipcRenderer.invoke("onboarding:createLocalVault", passphrase);
+  },
+  openLocalVault(): Promise<void> {
+    return ipcRenderer.invoke("onboarding:openLocalVault");
+  },
+  openRemoteVault(): Promise<void> {
+    return ipcRenderer.invoke("onboarding:openRemoteVault");
+  },
+  closeVault(): Promise<void> {
+    return ipcRenderer.invoke("onboarding:closeVault");
   },
   onCliProgress(
     cb: (payload: { percent: number; label: string }) => void,

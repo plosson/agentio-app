@@ -187,3 +187,41 @@ input:focus {
 .hidden {
   display: none !important;
 }
+
+.login-code {
+  font-size: 2em;
+  letter-spacing: 0.1em;
+}
+
+/* While a hub page shows, this page is only the bar above it. */
+body.with-vault #app {
+  display: block;
+  padding: 0;
+  min-height: 0;
+}
+
+.vault-bar {
+  height: var(--vault-bar-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.vault-bar span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vault-bar button {
+  flex: none;
+  padding: 5px 12px;
+  font-size: 13px;
+}
