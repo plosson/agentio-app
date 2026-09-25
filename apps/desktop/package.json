@@ -1,0 +1,80 @@
+{
+  "name": "@agentio/desktop",
+  "productName": "AgentIO Companion",
+  "version": "0.0.1",
+  "private": true,
+  "description": "AgentIO Companion — Electron app for remote vault UI + local CLI OAuth",
+  "author": {
+    "name": "Pierre A. Losson",
+    "email": "plosson@gmail.com"
+  },
+  "main": "dist/main/main.js",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "build:main": "tsc -p tsconfig.json",
+    "build:renderer": "vite build",
+    "build": "pnpm run build:main && pnpm run build:renderer",
+    "dev": "pnpm run build:main && node scripts/dev.mjs",
+    "start": "electron .",
+    "pack": "pnpm run build && electron-builder --mac --win --linux",
+    "pack:dir": "pnpm run build && electron-builder --dir",
+    "pack:linux": "pnpm run build && electron-builder --linux",
+    "release": "pnpm run build && electron-builder --publish never"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  },
+  "build": {
+    "appId": "com.plosson.agentio-companion",
+    "productName": "AgentIO Companion",
+    "copyright": "Copyright © Plosson",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "name": "agentio-companion",
+      "main": "dist/main/main.js"
+    },
+    "asar": true,
+    "npmRebuild": false,
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "category": "Development",
+      "executableName": "agentio-companion",
+      "maintainer": "Pierre A. Losson <plosson@gmail.com>",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "artifactName": "${name}-${version}-${arch}.${ext}"
+    },
+    "deb": {
+      "packageName": "agentio-companion"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/plosson/agentio-app.git"
+  }
+}
