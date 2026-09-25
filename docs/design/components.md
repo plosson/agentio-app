@@ -1,6 +1,6 @@
 # Components
 
-Precise specs for AgentIO Companion local chrome. Colors → [colors.md](./colors.md); type → [typography.md](./typography.md); space → [spacing-sizing.md](./spacing-sizing.md); motion → [motion-feedback.md](./motion-feedback.md).
+Precise specs for AgentIO Companion local chrome **and** AgentIO vault hub `/ui`. One System Utility Vault language. Colors → [colors.md](./colors.md); type → [typography.md](./typography.md); space → [spacing-sizing.md](./spacing-sizing.md); motion → [motion-feedback.md](./motion-feedback.md); ownership → [ui-ownership.md](./ui-ownership.md).
 
 All interactive components support: **default · hover · active · disabled · busy · focus-visible**.
 
@@ -308,6 +308,106 @@ Indeterminate: sliding 30% chunk (see motion) — only when % unknown.
 Used in: busy primary button, CLI progress active step, vault bar connecting.
 
 ---
+
+
+
+---
+
+## Hub components (vault `/ui`)
+
+Implement in `plosson/agentio` `src/daemon/ui/index.html`. Map to shared tokens (teal accent, soft zinc, radius 8–10px). Do **not** use `#0969da`.
+
+### 14. Hub header + tabs
+
+```
+┌─ [AgentIO vault]  [Profiles] [API keys] [Settings] ──── meta ─┐
+│  surface bg · 1px bottom border · matches companion vault bar │
+```
+
+| Part | Spec |
+|------|------|
+| Background | `--color-bg-elevated` / hub `--surface` |
+| Border bottom | `1px solid var(--color-border)` |
+| Title | ~18px / 600; `--color-text` |
+| Tab | body 14px / 500; secondary text; padding 0 12px; stretch to header height |
+| Tab hover | `--color-text` |
+| Tab active | `--color-text` + `border-bottom: 2px solid var(--color-accent)` |
+| Meta | caption / secondary |
+
+### 15. Profile / key table
+
+| Part | Spec |
+|------|------|
+| Card wrap | elevated surface, `1px` border, `--radius-control` or `--radius-hub` (~8–10px), quiet shadow |
+| `thead th` | bg `--color-table-header`; secondary caption weight 500 |
+| Row border | `--color-bg-subtle` / `--border-light` |
+| Primary cell | semibold text; secondary line caption |
+| Empty state | centered secondary, generous padding |
+
+### 16. Chips (service filters)
+
+| State | Spec |
+|-------|------|
+| Default | pill; border `--color-border`; bg `--color-chip-bg` / surface; text secondary |
+| Hover | text → `--color-text` |
+| Active | border + text `--color-accent`; bg `--color-accent-muted` |
+| Invalid emphasis | text `--color-danger`; weight 600 |
+
+### 17. Badges
+
+| Variant | Background | Color |
+|---------|------------|-------|
+| ok | `--color-ok-muted` | `--color-ok` |
+| invalid / error | `--color-danger-muted` | `--color-danger` |
+| no-creds / warn | `--color-warn-muted` | `--color-warn` |
+| skipped | table-header / code-bg | tertiary |
+| testing | `--color-accent-muted` | `--color-accent` |
+
+Pill radius; 12px / 600; padding `2px 8px`.
+
+### 18. Setting rows
+
+| Property | Value |
+|----------|-------|
+| Layout | flex space-between; gap 24px; padding 16px 0 |
+| Divider | top border `--color-bg-subtle` (skip first) |
+| Title | strong ~15px |
+| Description | body secondary |
+| Control | switch (checked = accent) or secondary/danger button |
+
+Danger card: border `--color-danger`; heading danger colored.
+
+### 19. Dialogs
+
+| Property | Value |
+|----------|-------|
+| Panel | elevated; border; radius `--radius-card` (12px); padding 24px; max width ~480 |
+| Backdrop | `--color-dialog-backdrop` / `--color-overlay` |
+| Title | 18px / 600 |
+| Body | 14px secondary |
+| Actions | row end; primary = CTA pills; destructive solid uses danger |
+
+### 20. Toasts
+
+| Property | Value |
+|----------|-------|
+| Position | fixed bottom-right stack |
+| Default | bg `--color-text`; fg inverted canvas; radius control; quiet shadow |
+| Error | bg `--color-danger`; fg white |
+
+### 21. Authorize code display
+
+Same language as companion device code:
+
+| Property | Value |
+|----------|-------|
+| Type | large mono (`--text-mono-display` or ≥1.5–2rem / 600 / tracking ~0.08–0.1em) |
+| Color | `--color-text` |
+| Class | hub `.code` — prefer larger type to match companion |
+
+### 22. Unlock view
+
+Centered ~400px column; soft mark in accent-muted circle; title + secondary body; passphrase field; full-width primary CTA (near-black pill). Matches companion local passphrase calm — no GitHub-blue hero.
 
 ## State checklist (all controls)
 

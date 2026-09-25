@@ -1,6 +1,6 @@
 # Layout
 
-Electron window geometry and region rules for AgentIO Companion.
+Electron window geometry and region rules for AgentIO Companion, plus vault hub `/ui` content width. Colors, type, radii, and buttons match System Utility Vault everywhere — only density differs.
 
 ---
 
@@ -87,7 +87,7 @@ Vertical centering: acceptable for short screens (Welcome). Prefer **top-weighte
 | Safe padding in bar | `12px` horizontal; left offset clear of traffic lights |
 | Overlay sheets (PTY / OAuth) | Prefer child window or modal over drawing on BrowserView; scrim `--color-overlay` |
 
-Companion does not restyle remote hub HTML — Option A buttons live in hub CSS when bridge present.
+Companion does **not** CSS-inject into the hub `BrowserView`. The hub ships System Utility Vault natively (`plosson/agentio` `src/daemon/ui/index.html`). Vault bar surface/border should match the hub header so chrome feels continuous.
 
 ---
 
@@ -110,3 +110,30 @@ Companion does not restyle remote hub HTML — Option A buttons live in hub CSS 
 4. OS titlebar controls  
 
 No persistent floating FAB.
+
+
+---
+
+## Hub `/ui` content layout
+
+Hub is a normal document inside the BrowserView (or a browser tab).
+
+```
+┌─ header (surface + bottom border) ──────── tabs ── meta ─┐
+│                                                          │
+│  main (max-width: ~1040px; margin auto; padding 24px)    │
+│    page-head → chips → card/table → settings             │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+| Rule | Value |
+|------|-------|
+| Main max-width | **~1040px** (`--layout-hub-main`) — OK for profile tables |
+| Side padding | **24px** |
+| Page vertical rhythm | 32px top margin on main; 20px under page-head |
+| Unlock / authorize narrow | ~400px centered (wizard-like), same tokens |
+| Cards / dialogs radius | 8–10px controls; 12px dialogs |
+| Shadows | Quiet (`--shadow`); no heavy SaaS elevation |
+
+Companion onboarding stays **420px**. Hub tables stay **1040**. Shared: zinc canvas, teal accent, black/white pills, system type.

@@ -1,12 +1,15 @@
 /**
- * AgentIO Companion — design tokens
+ * System Utility Vault — shared design tokens
  * Source of truth: docs/design/*.md
  *
- * Import into the desktop renderer and migrate apps/desktop/src/renderer/styles.css
- * off the old slate (#0f172a/#1e293b) + sky (#38bdf8) palette onto these variables.
+ * Surfaces:
+ *   - AgentIO Companion Electron renderer (import / copy this file)
+ *   - AgentIO vault hub /ui (mirror semantic values in src/daemon/ui/index.html)
+ *
+ * Migrate companion off slate (#0f172a/#1e293b) + sky (#38bdf8).
+ * Migrate hub off GitHub blue (#0969da / #58a6ff).
  *
  *   @import url("./tokens.css");
- *   /* or copy beside styles.css once packaging requires a local path */
  */
 
 :root {
@@ -34,6 +37,13 @@
   --color-progress-track: #e5e5ea;
   --color-progress-fill: #0f766e;
   --color-overlay: rgba(0, 0, 0, 0.36);
+
+  /* Hub / shared extended */
+  --color-warn: #9a6700;
+  --color-warn-muted: #fff8c5;
+  --color-chip-bg: #ffffff;
+  --color-table-header: #eef0f4;
+  --color-dialog-backdrop: rgba(0, 0, 0, 0.36);
 
   /* Primary CTA uses text-on-inverted mapping */
   --color-cta-bg: var(--color-text);
@@ -87,6 +97,7 @@
   /* —— Layout —— */
   --layout-column: 420px;
   --layout-column-padding-x: var(--space-6);
+  --layout-hub-main: 1040px;
   --vault-bar-height: 40px;
   --window-min-width-onboarding: 480px;
   --window-min-height-onboarding: 560px;
@@ -96,6 +107,7 @@
   /* —— Radii & borders —— */
   --radius-control: 8px;
   --radius-card: 12px;
+  --radius-hub: 10px; /* hub cards/dialogs soft */
   --radius-pill: 999px;
   --radius-window: 0;
   --radius-progress: 4px;
@@ -148,6 +160,12 @@
     --color-progress-fill: #2dd4bf;
     --color-overlay: rgba(0, 0, 0, 0.56);
 
+    --color-warn: #d29922;
+    --color-warn-muted: rgba(187, 128, 9, 0.15);
+    --color-chip-bg: #2c2c2e;
+    --color-table-header: #2a2a2e;
+    --color-dialog-backdrop: rgba(0, 0, 0, 0.56);
+
     --color-cta-bg: var(--color-text);
     --color-cta-fg: #1c1c1e;
   }
@@ -179,6 +197,12 @@
   --color-progress-fill: #2dd4bf;
   --color-overlay: rgba(0, 0, 0, 0.56);
 
+  --color-warn: #d29922;
+  --color-warn-muted: rgba(187, 128, 9, 0.15);
+  --color-chip-bg: #2c2c2e;
+  --color-table-header: #2a2a2e;
+  --color-dialog-backdrop: rgba(0, 0, 0, 0.56);
+
   --color-cta-bg: var(--color-text);
   --color-cta-fg: #1c1c1e;
 }
@@ -207,6 +231,12 @@
   --color-progress-track: #e5e5ea;
   --color-progress-fill: #0f766e;
   --color-overlay: rgba(0, 0, 0, 0.36);
+
+  --color-warn: #9a6700;
+  --color-warn-muted: #fff8c5;
+  --color-chip-bg: #ffffff;
+  --color-table-header: #eef0f4;
+  --color-dialog-backdrop: rgba(0, 0, 0, 0.36);
 
   --color-cta-bg: var(--color-text);
   --color-cta-fg: #ffffff;

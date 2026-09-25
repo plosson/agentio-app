@@ -1,8 +1,12 @@
 # Overview — System Utility Vault
 
-AgentIO Companion’s local UI (onboarding + thin vault chrome) should feel like a **macOS system utility**: calm, precise, and embedded in the desktop — not a marketing SaaS shell.
+AgentIO’s local companion UI **and** the vault hub `/ui` share one visual language: a **macOS system utility** — calm, precise, and embedded in the desktop — not a marketing SaaS shell and not a GitHub-blue admin panel.
 
-Product behavior lives in [electron-companion-spec.md](../plans/electron-companion-spec.md). This doc locks the **visual principles** and **screen map** implementers must follow.
+Product behavior for the companion lives in [electron-companion-spec.md](../plans/electron-companion-spec.md). Hub behavior lives in `plosson/agentio`. This doc locks the **visual principles** and the **unified screen map** implementers must follow.
+
+Principles apply **everywhere** — companion onboarding, companion vault bar, and every hub screen (Unlock, Profiles, API keys, Settings, Authorize, dialogs, toasts). There is no “hub keeps its own CSS” exception.
+
+Companion chrome bar + hub content should feel **continuous**: same soft-zinc background family, same system type stack, same teal accent, same near-black / near-white primary pills.
 
 ---
 
@@ -11,13 +15,13 @@ Product behavior lives in [electron-companion-spec.md](../plans/electron-compani
 ### 1. Native first
 
 - Prefer system fonts, OS traffic lights, and quiet window chrome.
-- Background is the window itself (soft zinc), not a dark floating card on a darker void.
+- Background is the window / page itself (soft zinc), not a dark floating card on a darker void.
 - Controls look like macOS / System Settings siblings: pills, clear hierarchy, restrained borders.
 
 ### 2. One accent
 
-- Brand teal `#0F766E` appears sparingly: focus rings, progress fill, spinner, selected card edge, sparse links.
-- Primary actions are **near-black / near-white pills**, never teal-filled hero buttons and never sky cyan.
+- Brand teal `#0F766E` appears sparingly: focus rings, progress fill, spinner, selected card edge, active tab underline, active chips, switches checked, sparse links.
+- Primary actions are **near-black / near-white pills**, never teal-filled hero buttons, never sky cyan, never GitHub blue `#0969da`.
 
 ### 3. Honesty in progress
 
@@ -28,7 +32,7 @@ Product behavior lives in [electron-companion-spec.md](../plans/electron-compani
 ### 4. Quiet chrome
 
 - Onboarding: minimal titlebar, centered column, no sidebar, no marketing hero.
-- Vault mode: thin companion bar + remote hub `/ui` in a `BrowserView` — chrome stays out of the way.
+- Vault mode: thin companion bar + hub `/ui` in a `BrowserView` — chrome stays out of the way; bar surface matches hub header.
 - Elevation is subtle (1px borders, soft radius); avoid heavy drop shadows and glass stacks.
 
 ---
@@ -37,15 +41,17 @@ Product behavior lives in [electron-companion-spec.md](../plans/electron-compani
 
 | Do | Don’t |
 |----|-------|
-| Full-window soft zinc background | Slate `#0f172a` / `#1e293b` “panel on void” |
-| Centered ~420px wizard column | Wide dashboard layouts during onboarding |
-| Near-black / near-white primary pills | Sky `#38bdf8` or cyan primary buttons |
-| Teal for focus, progress, spinner only | Teal wash backgrounds or teal-on-teal text |
-| SF Pro / `system-ui` | Custom display fonts or inter-as-brand |
-| Mono for codes, paths, versions | Mono for body copy or button labels |
+| Full-window / full-page soft zinc background | Slate `#0f172a` / `#1e293b` “panel on void” |
+| Centered ~420px wizard column (companion) | Wide dashboard layouts during onboarding |
+| Hub main ~1040 max-width for tables | Different accent or button language in hub vs companion |
+| Near-black / near-white primary pills | Sky `#38bdf8` **or** GitHub `#0969da` primary buttons |
+| Teal for focus, progress, tabs, chips, switches | Teal wash backgrounds or teal-on-teal text |
+| SF Pro / `system-ui` (+ system mono for codes) | Custom display fonts; IBM Plex as required brand |
+| Mono for codes, paths, versions, authorize codes | Mono for body copy or button labels |
 | Checklist + tip strips for delight | Mascots, confetti, emoji explosions |
 | WCAG AA text/button contrast | Low-contrast muted-on-muted labels |
 | `prefers-reduced-motion` respect | Endless bounce animations |
+| Hub ships shared look natively | Companion CSS-inject into BrowserView |
 
 ---
 
@@ -63,9 +69,9 @@ Use as **reference only**; do not copy artwork or copywriting:
 
 ---
 
-## Screen map
+## Unified screen map
 
-Local companion-owned screens (not the remote hub `/ui`):
+### Companion (local Electron renderer)
 
 ```
   [Welcome]
@@ -89,23 +95,45 @@ Local companion-owned screens (not the remote hub `/ui`):
                          [Vault bar + hub /ui]
 ```
 
-| Screen ID | Name | Purpose |
-|-----------|------|---------|
-| W | **Welcome** | Explain CLI need; Install / Update / use existing |
-| P | **CLI progress** | Determinate install/update with checklist + tips |
-| R | **CLI ready** | Confirm version + path; Continue |
-| V | **Choose vault** | Selection cards: Local vs Remote |
-| U | **Connect URL** | HTTPS vault hub URL + remember |
-| D | **Device code** | Large-type device login code for remote hub |
-| L | **Local passphrase** | Unlock local vault with passphrase field |
-| B | **Vault bar** | Thin companion chrome over remote/local UI |
+| ID | Screen | Purpose | Repo |
+|----|--------|---------|------|
+| W | **Welcome** | Explain CLI need; Install / Update / use existing | agentio-app |
+| P | **CLI progress** | Determinate install/update with checklist + tips | agentio-app |
+| R | **CLI ready** | Confirm version + path; Continue | agentio-app |
+| V | **Choose vault** | Selection cards: Local vs Remote | agentio-app |
+| U | **Connect URL** | HTTPS vault hub URL + remember | agentio-app |
+| D | **Device code** | Large-type device login code for remote hub | agentio-app |
+| L | **Local passphrase** | Unlock local vault with passphrase field | agentio-app |
+| B | **Vault bar** | Thin companion chrome over hub `/ui` | agentio-app |
 
 Returning users may skip Welcome→CLI ready when CLI is current, and may skip Choose vault / URL when preferences are remembered (see product spec).
+
+### Vault hub (`/ui` in BrowserView or browser)
+
+```
+  [Unlock] ──passphrase──► [Profiles] ←→ [API keys] ←→ [Settings]
+                                  │
+                                  └── hash #authorize=<code> → [Authorize]
+```
+
+| ID | Screen | Purpose | Repo |
+|----|--------|---------|------|
+| H | **Unlock** | Passphrase unlock; calm centered card matching companion passphrase vibe | agentio |
+| Pr | **Profiles** | Header+tabs, chips, profile table, row menus | agentio |
+| K | **API keys** | Key table, create form, token dialog | agentio |
+| S | **Settings** | Setting rows, danger lock | agentio |
+| A | **Authorize** | Large mono approval code + Approve / Deny | agentio |
+| — | **Dialogs / toasts** | Confirm, rename, token reveal; toast stack | agentio |
+
+Hub layout: sticky header with tabs on soft surface; `main` max-width ~1040. Colors, type, radius, and buttons match companion tokens — only density differs (tables need width).
+
+Continuity rule: when the companion vault bar sits above the hub, the bar’s background and bottom border should match the hub header so the seam disappears.
 
 ---
 
 ## Related docs
 
+- Ownership → [ui-ownership.md](./ui-ownership.md)
 - Colors → [colors.md](./colors.md)
 - Type → [typography.md](./typography.md)
 - Space → [spacing-sizing.md](./spacing-sizing.md)
