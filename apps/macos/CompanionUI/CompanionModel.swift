@@ -75,6 +75,8 @@ public final class CompanionModel {
     private var daemon: (any LocalDaemon)?
     /// The latest download; a step that needs the CLI waits for it while it runs.
     private var downloadTask: Task<Result<CliInfo, Error>, Never>?
+    /// The running download; a download that is no longer current changes nothing.
+    private var downloadID: UUID?
     /// The screen a failed download goes back to on "Try again".
     private var downloadFrom: Screen?
     /// Loading the add sheet; stopped with the sheet.
@@ -98,7 +100,7 @@ public final class CompanionModel {
     /// Start the CLI download if the app's CLI is missing or too old, then show the mode screen.
     public func start() async {
         let installed = await backend.detectCli()
-        if installed?.isAtLeast(minimumCliVersion) != true {
+        if installed?.isAtLeast(minimumCliVersion) != true, !isDownloading {
             startDownload(atLeast: minimumCliVersion)
         }
         await enterMode()
@@ -116,7 +118,7 @@ public final class CompanionModel {
         }
         if screen != .installing { downloadFrom = screen }
         screen = .installing
-        let running = [.downloading, .settingUp, .checking].contains(download.phase) ? downloadTask : nil
+        let running = isDownloading ? downloadTask : nil
         var outcome = await (running ?? startDownload(atLeast: minimum)).value
         // The launch download only reached the app's minimum; this step needs more.
         if case .success(let info) = outcome, !info.isAtLeast(minimum) {
@@ -134,17 +136,21 @@ public final class CompanionModel {
         }
     }
 
+    private var isDownloading: Bool { [.downloading, .settingUp, .checking].contains(download.phase) }
+
     /// Install the latest CLI in the background, showing its progress in `download`.
     @discardableResult
     private func startDownload(atLeast minimum: CliVersion) -> Task<Result<CliInfo, Error>, Never> {
         download = DownloadState(phase: .downloading)
+        let id = UUID()
+        downloadID = id
         let backend = backend
         let task = Task { () -> Result<CliInfo, Error> in
             // Progress arrives on the installer's threads; apply it in order,
             // and all of it before the final 100%.
             let (events, sink) = AsyncStream<InstallProgress>.makeStream()
             let applying = Task {
-                for await event in events { applyInstallProgress(event) }
+                for await event in events where downloadID == id { applyInstallProgress(event) }
             }
             let outcome: Result<CliInfo, Error>
             do {
@@ -154,6 +160,7 @@ public final class CompanionModel {
             }
             sink.finish()
             await applying.value
+            guard downloadID == id else { return outcome }
             switch outcome {
             case .success(let info):
                 cli = info
@@ -398,6 +405,7 @@ public final class CompanionModel {
         closeAddFlow()
         guard screen == .vault, hubURL != daemon?.url.absoluteString else { return }
         vaultPage = nil
+        screen = .hubURL
         await signIn(url: hubURL, remember: settings.rememberedHubURL == hubURL)
     }
 

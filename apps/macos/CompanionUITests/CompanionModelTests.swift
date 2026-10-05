@@ -235,6 +235,7 @@ struct CompanionModelTests {
         model.goLocal()
         #expect(model.screen == .local)
         await eventually { backend.installs.count == 1 }  // the launch download only
+        backend.openInstallGate()
     }
 
     @Test func creatingAVaultWaitsForTheRunningDownloadInsteadOfStartingAnother() async {
@@ -258,6 +259,7 @@ struct CompanionModelTests {
         await eventually { model.download.phase == .failed }
         model.goLocal()
         await model.createLocalVault(passphrase: "correct horse", again: "correct horse")
+        #expect(backend.installs.count == 2)  // a new install, not the old failure awaited again
         #expect(model.screen == .installing)
         #expect(model.download.phase == .failed)
         #expect(model.error == "The installer exited with code 1: no network")
@@ -272,11 +274,42 @@ struct CompanionModelTests {
     @Test func retryDoesNothingUnlessTheDownloadFailed() async {
         backend.detected = nil
         backend.installGate = true
+        backend.installEvents = [.label("working")]
+        await model.start()
+        await eventually { model.download.log == ["working"] }
+        model.retryDownload()
+        #expect(model.download.log == ["working"])
+        #expect(model.download.phase == .downloading)
+        #expect(backend.installs.count == 1)
+        backend.openInstallGate()
+        await eventually { model.download.phase == .ready }
+    }
+
+    @Test func startingTwiceWhileTheDownloadRunsInstallsOnce() async {
+        backend.detected = nil
+        backend.installGate = true
         await model.start()
         await eventually { backend.installs.count == 1 }
-        model.retryDownload()
+        await model.start()
         try? await Task.sleep(for: .milliseconds(50))
         #expect(backend.installs.count == 1)
+        backend.openInstallGate()
+        await eventually { model.download.phase == .ready }
+    }
+
+    @Test func aFailedSignInAgainDownloadTriesAgainOnTheHubAddress() async {
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: false))
+        await model.openRemoteVault()
+        #expect(model.screen == .vault)
+        backend.hubVersionResult = .success(CliVersion("3.20.0")!)
+        backend.installResult = .failure(AgentioError("no network"))
+        await model.signInAgain()
+        #expect(model.screen == .installing)
+        #expect(model.download.phase == .failed)
+        backend.installResult = .success(CliInfo(path: URL(filePath: "/app/bin/agentio"), version: "3.20.0"))
+        model.retryDownload()
+        #expect(model.screen == .hubURL)
+        await eventually { model.download.phase == .ready }
     }
 
     @Test func aHubNeedingANewerCliThanTheLaunchDownloadGetsOneMoreInstall() async {
