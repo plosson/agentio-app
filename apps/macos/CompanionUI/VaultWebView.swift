@@ -12,7 +12,7 @@ struct VaultWebView: NSViewRepresentable {
     let notice: PageNotice?
     let onSignInAgain: @MainActor () -> Void
     let onAddProfile: @MainActor (String, String?) -> Void
-    let onReauth: @MainActor (String, String?) -> Void
+    let onReauth: @MainActor (String, String?, String?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 

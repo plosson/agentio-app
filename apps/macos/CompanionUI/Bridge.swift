@@ -5,7 +5,7 @@ import WebKit
 /// A call from the hub page's `window.agentioCompanion` (spec Option A).
 public enum BridgeCall: Equatable, Sendable {
     case addProfile(service: String, displayName: String?)
-    case reauth(service: String, name: String?)
+    case reauth(service: String, name: String?, displayName: String?)
     case openTerminal
     /// Move the window with the mouse: the page calls it on a mouse-down in
     /// an empty part of its headers (WKWebView ignores `app-region: drag`).
@@ -23,8 +23,9 @@ public enum BridgeCall: Equatable, Sendable {
         switch (method, strings.count) {
         case ("addProfile", 1): self = .addProfile(service: strings[0], displayName: nil)
         case ("addProfile", 2): self = .addProfile(service: strings[0], displayName: strings[1])
-        case ("reauth", 1): self = .reauth(service: strings[0], name: nil)
-        case ("reauth", 2): self = .reauth(service: strings[0], name: strings[1])
+        case ("reauth", 1): self = .reauth(service: strings[0], name: nil, displayName: nil)
+        case ("reauth", 2): self = .reauth(service: strings[0], name: strings[1], displayName: nil)
+        case ("reauth", 3): self = .reauth(service: strings[0], name: strings[1], displayName: strings[2])
         case ("openTerminal", 0): self = .openTerminal
         case ("dragWindow", 0): self = .dragWindow
         case ("signInAgain", 0): self = .signInAgain
@@ -51,7 +52,7 @@ func bridgeScript(canManageProfiles: Bool?) -> String {
       present: true,
       ...(right === null ? {} : { canManageProfiles: right }),
       addProfile: (service, displayName) => call("addProfile", displayName == null ? [service] : [service, displayName]),
-      reauth: (service, name) => call("reauth", name == null ? [service] : [service, name]),
+      reauth: (service, name, displayName) => call("reauth", name == null ? [service] : displayName == null ? [service, name] : [service, name, displayName]),
       openTerminal: () => call("openTerminal", []),
       dragWindow: () => call("dragWindow", []),
       signInAgain: () => call("signInAgain", []),
@@ -138,12 +139,12 @@ func profilesChangedScript(_ notice: PageNotice) -> String {
 /// The bridge's actions, for the page in `webView`. The terminal action
 /// is a stub until the terminal (S7) exists.
 @MainActor func performBridgeCall(_ call: BridgeCall, in webView: HubWebView?, signInAgain: () -> Void,
-                                  addProfile: (String, String?) -> Void, reauth: (String, String?) -> Void) {
+                                  addProfile: (String, String?) -> Void, reauth: (String, String?, String?) -> Void) {
     switch call {
     case .addProfile(let service, let displayName):
         addProfile(service, displayName)
-    case .reauth(let service, let name):
-        reauth(service, name)
+    case .reauth(let service, let name, let displayName):
+        reauth(service, name, displayName)
     case .openTerminal:
         bridgeLog.notice("[bridge stub] openTerminal() — PTY later")
     case .dragWindow:

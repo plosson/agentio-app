@@ -350,9 +350,9 @@ public final class CompanionModel {
 
     /// The hub page asked to sign `profile` of `service` in again. Same conditions as `addProfile`,
     /// and the name must be one.
-    public func reauthProfile(service: String, profile: String) {
+    public func reauthProfile(service: String, profile: String, displayName: String? = nil) {
         guard isProfileName(profile) else { return }
-        openFlow(service: service, displayName: service, purpose: .reauth(profile: profile))
+        openFlow(service: service, displayName: displayName ?? service, purpose: .reauth(profile: profile))
     }
 
     private func openFlow(service: String, displayName: String, purpose: AddProfileFlow.Purpose) {

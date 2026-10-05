@@ -108,6 +108,14 @@ struct CompanionModelTests {
         #expect(model.addFlow?.service == "gmail")
         #expect(model.addFlow?.purpose == .reauth(profile: "work"))
         #expect(model.addFlow?.step == .confirm)
+        #expect(model.addFlow?.displayName == "gmail")
+    }
+
+    @Test func reauthNamesTheServiceAsThePageShowsIt() async {
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.openRemoteVault()
+        model.reauthProfile(service: "gmail", profile: "x", displayName: "Gmail")
+        #expect(model.addFlow?.displayName == "Gmail")
     }
 
     @Test func reauthOnALocalVaultDoesNothing() async {
