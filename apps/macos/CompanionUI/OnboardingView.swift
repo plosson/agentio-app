@@ -37,6 +37,11 @@ struct OnboardingView: View {
         case .hubURL: HubURLScreen(model: model)
         case .login: LoginScreen(model: model)
         case .local: LocalVaultScreen(model: model)
+        case .done:
+            VStack(spacing: 16) {
+                Text("All set").font(.title)
+                Button("Open vault") { model.openVault() }
+            }
         case .approving, .vault: EmptyView()
         }
     }

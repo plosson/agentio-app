@@ -395,11 +395,68 @@ struct CompanionModelTests {
         #expect(model.vaultPage == code.verifyURL)
         backend.finishLogin(.success(()))
         await signIn.value
+        #expect(model.screen == .done)
+        #expect(model.finished == .signedIn(hub: "https://h.example"))
+        #expect(model.vaultPage == nil)
+        model.openVault()
         #expect(model.screen == .vault)
+        #expect(model.finished == nil)
         #expect(model.vaultPage == URL(string: "https://h.example/ui"))
         #expect(model.loginCode == nil)
         #expect(model.rememberURL == false)
         #expect(model.windowTitle == "AgentIO Companion — h.example")
+    }
+
+    @Test func signInAgainFromTheHubPageSkipsTheCelebration() async {
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: false))
+        await model.openRemoteVault()
+        backend.loginCode = code
+        let again = Task { await model.signInAgain() }
+        await eventually { model.loginCode == code }
+        backend.finishLogin(.success(()))
+        await again.value
+        #expect(model.screen == .vault)
+        #expect(model.finished == nil)
+    }
+
+    @Test func openVaultDoesNothingOutsideTheDoneScreen() async {
+        model.openVault()
+        #expect(model.vaultPage == nil)
+        #expect(model.screen == .mode)
+    }
+
+    @Test func copyingTheLinkCopiesTheApprovalAddressAndResetsWithANewCode() async {
+        var copied: [String] = []
+        let model = CompanionModel(backend: backend, settings: settings, allowLocalHTTP: false, deviceName: "d",
+                                   openURL: { _ in }, copy: { copied.append($0) })
+        model.copyApprovalLink()
+        #expect(copied.isEmpty)            // no code yet
+        backend.loginCode = code
+        model.goRemote()
+        let signIn = Task { await model.signIn(url: "https://h.example", remember: false) }
+        await eventually { model.loginCode == code }
+        model.copyApprovalLink()
+        #expect(copied == [code.verifyURL.absoluteString])
+        #expect(model.copiedLink)
+        model.cancelLogin()
+        await signIn.value
+        #expect(!model.copiedLink)
+    }
+
+    @Test func reopeningAnExistingLocalVaultSkipsTheCelebration() async {
+        backend.vaultStateResult = .success(.local)
+        await model.start()
+        await model.openLocalVault()
+        #expect(model.screen == .vault)
+        #expect(model.finished == nil)
+    }
+
+    @Test func openingTheWebsiteOpensAgentioCom() {
+        var opened: [URL] = []
+        let model = CompanionModel(backend: backend, settings: settings, allowLocalHTTP: false, deviceName: "d",
+                                   openURL: { opened.append($0) })
+        model.openWebsite()
+        #expect(opened == [URL(string: "https://agentio.com")!])
     }
 
     @Test func rememberedHubURLIsSavedOnlyWhenAsked() async {
@@ -472,6 +529,8 @@ struct CompanionModelTests {
         #expect(model.error == nil)
         backend.finishLogin(.success(()))
         await second.value
+        #expect(model.finished == .signedIn(hub: "https://h.example"))
+        model.openVault()
         #expect(model.vaultPage == URL(string: "https://h.example/ui"))
     }
 
@@ -520,7 +579,7 @@ struct CompanionModelTests {
         await eventually { backend.logins.count == 1 }
         backend.finishLogin(.success(()))
         await signIn.value
-        #expect(model.screen == .vault)
+        #expect(model.screen == .done)
         #expect(model.canManageProfiles == false)
     }
 
@@ -672,6 +731,10 @@ struct CompanionModelTests {
         await model.createLocalVault(passphrase: "correct horse", again: "correct horse")
         #expect(backend.passphrases == ["correct horse"])
         #expect(backend.daemons.count == 1)
+        #expect(model.screen == .done)
+        #expect(model.finished == .createdLocal)
+        #expect(model.vaultPage == nil)
+        model.openVault()
         #expect(model.vaultPage == URL(string: "http://127.0.0.1:63168/ui"))
         #expect(model.screen == .vault)
         #expect(model.busy == nil)

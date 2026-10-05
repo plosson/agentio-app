@@ -17,6 +17,8 @@ public enum Screen: Equatable, Sendable {
     case approving
     /// Create a local vault.
     case local
+    /// A new sign-in or a new local vault succeeded; the hub page opens from here.
+    case done
     /// S6: the hub's page fills the window.
     case vault
 }
@@ -47,7 +49,14 @@ public final class CompanionModel {
     public private(set) var cli: CliInfo?
     /// Nil while the vault state is being read.
     public private(set) var vault: VaultState?
-    public private(set) var loginCode: LoginCode?
+    public private(set) var loginCode: LoginCode? {
+        didSet { if loginCode != oldValue { copiedLink = false } }
+    }
+    /// True after copyApprovalLink, until the sign-in code changes.
+    public private(set) var copiedLink = false
+    /// What the "All set" screen celebrates.
+    public enum Finished: Equatable, Sendable { case signedIn(hub: String), createdLocal }
+    public private(set) var finished: Finished?
     /// The app's CLI download, for the onboarding page.
     public struct DownloadState: Equatable, Sendable {
         public enum Phase: String, Sendable { case idle, downloading, settingUp, checking, ready, failed }
@@ -80,6 +89,7 @@ public final class CompanionModel {
 
     private let backend: any CompanionBackend
     private let openURL: @MainActor (URL) -> Void
+    private let copy: @MainActor (String) -> Void
     private let settings: CompanionSettings
     private let allowLocalHTTP: Bool
     private let deviceName: String
@@ -95,13 +105,20 @@ public final class CompanionModel {
     private var hubCheckID: UUID?
     /// The screen a failed download goes back to on "Try again".
     private var downloadFrom: Screen?
+    /// The hub page the "All set" screen opens.
+    private var pendingPage: String?
     /// Loading the add sheet; stopped with the sheet.
     private var addFlowStart: Task<Void, Never>?
 
     public init(backend: any CompanionBackend, settings: CompanionSettings, allowLocalHTTP: Bool, deviceName: String,
-                openURL: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }) {
+                openURL: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) },
+                copy: @escaping @MainActor (String) -> Void = {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString($0, forType: .string)
+                }) {
         self.backend = backend
         self.openURL = openURL
+        self.copy = copy
         self.settings = settings
         self.allowLocalHTTP = allowLocalHTTP
         self.deviceName = deviceName
@@ -236,6 +253,8 @@ public final class CompanionModel {
     public func enterMode() async {
         screen = .mode
         vault = nil
+        finished = nil
+        pendingPage = nil
         guard let installed = await backend.detectCli() else {
             vault = VaultState.none
             return
@@ -291,7 +310,7 @@ public final class CompanionModel {
 
     /// Check the hub's version, bring the CLI up to it, then `agentio login`,
     /// approved by the hub owner on the hub's page.
-    public func signIn(url raw: String, remember: Bool) async {
+    public func signIn(url raw: String, remember: Bool, celebrate: Bool = true) async {
         error = nil
         let hub: String
         do {
@@ -339,7 +358,14 @@ public final class CompanionModel {
         switch result {
         case .success(let state):
             if case .remote(_, let right) = state { canManageProfiles = right }
-            showVault("\(hub)/ui")
+            if celebrate {
+                pendingPage = "\(hub)/ui"
+                finished = .signedIn(hub: hub)
+                vaultPage = nil
+                screen = .done
+            } else {
+                showVault("\(hub)/ui")
+            }
         case .failure(let failure):
             // Failed or cancelled: drop the approval page, if it is showing.
             vaultPage = nil
@@ -397,7 +423,12 @@ public final class CompanionModel {
         defer { busy = nil }
         do {
             try await backend.initVault(passphrase: passphrase)
-            try await showLocalVault()
+            let url = try await runningDaemonURL()
+            hubURL = url.absoluteString
+            canManageProfiles = nil
+            pendingPage = "\(hubURL)/ui"
+            finished = .createdLocal
+            screen = .done
         } catch {
             fail(error)
         }
@@ -409,14 +440,17 @@ public final class CompanionModel {
         busy = "Starting the local vault…"
         defer { busy = nil }
         do {
-            try await showLocalVault()
+            let url = try await runningDaemonURL()
+            hubURL = url.absoluteString
+            canManageProfiles = nil
+            showVault("\(hubURL)/ui")
         } catch {
             fail(error)
         }
     }
 
-    /// Start the local daemon (unless this app already runs it) and open its UI.
-    private func showLocalVault() async throws {
+    /// Start the local daemon, unless this app already runs it.
+    private func runningDaemonURL() async throws -> URL {
         let running: any LocalDaemon
         if let daemon {
             running = daemon
@@ -428,9 +462,27 @@ public final class CompanionModel {
                 if daemon === running { daemon = nil }
             }
         }
-        hubURL = running.url.absoluteString
-        canManageProfiles = nil
-        showVault("\(hubURL)/ui")
+        return running.url
+    }
+
+    /// Open the hub page from the "All set" screen.
+    public func openVault() {
+        guard screen == .done, let page = pendingPage else { return }
+        pendingPage = nil
+        finished = nil
+        showVault(page)
+    }
+
+    /// Copy the approval address for the hub's owner.
+    public func copyApprovalLink() {
+        guard let loginCode else { return }
+        copy(loginCode.verifyURL.absoluteString)
+        copiedLink = true
+    }
+
+    /// Open https://agentio.com in the browser.
+    public func openWebsite() {
+        openURL(URL(string: "https://agentio.com")!)
     }
 
     // MARK: Vault window (S6)
@@ -449,7 +501,7 @@ public final class CompanionModel {
         guard screen == .vault, hubURL != daemon?.url.absoluteString else { return }
         vaultPage = nil
         screen = .hubURL
-        await signIn(url: hubURL, remember: settings.rememberedHubURL == hubURL)
+        await signIn(url: hubURL, remember: settings.rememberedHubURL == hubURL, celebrate: false)
     }
 
     // MARK: Adding a profile (from the hub page)
