@@ -87,6 +87,83 @@ struct CompanionModelTests {
         #expect(backend.startedAdds.isEmpty)
     }
 
+    // MARK: Signing a profile in again
+
+    @Test func reauthNeedsAnOpenRemoteVaultWhoseKeyMayManageProfiles() async {
+        model.reauthProfile(service: "gmail", profile: "work")
+        #expect(model.addFlow == nil)
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: false))
+        await model.openRemoteVault()
+        model.reauthProfile(service: "gmail", profile: "work")
+        #expect(model.addFlow == nil)
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: nil))
+        await model.switchVault()
+        await model.openRemoteVault()
+        model.reauthProfile(service: "gmail", profile: "work")
+        #expect(model.addFlow == nil)
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.switchVault()
+        await model.openRemoteVault()
+        model.reauthProfile(service: "gmail", profile: "work")
+        #expect(model.addFlow?.service == "gmail")
+        #expect(model.addFlow?.purpose == .reauth(profile: "work"))
+        #expect(model.addFlow?.step == .confirm)
+    }
+
+    @Test func reauthOnALocalVaultDoesNothing() async {
+        await model.openLocalVault()
+        #expect(model.screen == .vault)
+        model.reauthProfile(service: "gmail", profile: "work")
+        #expect(model.addFlow == nil)
+    }
+
+    @Test(arguments: ["", "-x", "--json", "a\nb", String(repeating: "a", count: 201)])
+    func reauthRefusesANameThatIsNotOne(_ name: String) async {
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.openRemoteVault()
+        model.reauthProfile(service: "gmail", profile: name)
+        #expect(model.addFlow == nil)
+    }
+
+    @Test func oneSheetAtATimeAcrossAddAndReauth() async {
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.openRemoteVault()
+        model.addProfile(service: "kite", displayName: "Kite")
+        let add = model.addFlow
+        model.reauthProfile(service: "gmail", profile: "work")
+        #expect(model.addFlow === add)
+        model.closeAddFlow()
+        model.reauthProfile(service: "gmail", profile: "work")
+        let reauth = model.addFlow
+        #expect(reauth?.purpose == .reauth(profile: "work"))
+        model.addProfile(service: "kite", displayName: "Kite")
+        model.reauthProfile(service: "gmail", profile: "other")
+        #expect(model.addFlow === reauth)
+    }
+
+    @Test func aSignInAgainIsANoticeForThePage() async throws {
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.openRemoteVault()
+        model.reauthProfile(service: "gmail", profile: "work")
+        model.addFlow?.submit()
+        #expect(backend.startedReauths == ["gmail|work"])
+        try #require(backend.addRuns.first).finish(.success("work"))
+        await eventually { model.pageNotice?.profile == "work" }
+        #expect(model.pageNotice?.service == "gmail")
+    }
+
+    @Test func switchingVaultCancelsASignInAgain() async throws {
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.openRemoteVault()
+        model.reauthProfile(service: "gmail", profile: "work")
+        model.addFlow?.submit()
+        let run = try #require(backend.addRuns.first)
+        await model.switchVault()
+        #expect(run.cancelled)
+        #expect(model.addFlow == nil)
+        #expect(model.pageNotice == nil)
+    }
+
     // MARK: CLI
 
     @Test func aFreshAppShowsTheChoiceWithoutRunningAnything() async {

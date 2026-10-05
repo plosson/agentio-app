@@ -135,15 +135,15 @@ func profilesChangedScript(_ notice: PageNotice) -> String {
     return "window.dispatchEvent(new CustomEvent('agentio:profiles-changed', { detail: { service: \(literal(notice.service)), profile: \(literal(notice.profile)) } }));"
 }
 
-/// The bridge's actions, for the page in `webView`. The reauth and
-/// terminal actions are stubs until the terminal (S7) exists.
+/// The bridge's actions, for the page in `webView`. The terminal action
+/// is a stub until the terminal (S7) exists.
 @MainActor func performBridgeCall(_ call: BridgeCall, in webView: HubWebView?, signInAgain: () -> Void,
-                                  addProfile: (String, String?) -> Void) {
+                                  addProfile: (String, String?) -> Void, reauth: (String, String?) -> Void) {
     switch call {
     case .addProfile(let service, let displayName):
         addProfile(service, displayName)
     case .reauth(let service, let name):
-        bridgeLog.notice("[bridge stub] reauth(\(service, privacy: .public), \(name ?? "nil", privacy: .public)) — PTY later")
+        reauth(service, name)
     case .openTerminal:
         bridgeLog.notice("[bridge stub] openTerminal() — PTY later")
     case .dragWindow:

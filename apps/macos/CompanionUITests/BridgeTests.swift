@@ -30,6 +30,20 @@ struct BridgeCallTests {
     }
 }
 
+@MainActor
+struct BridgeActionTests {
+    @Test func reauthReachesOnlyTheReauthAction() {
+        var reauths: [String] = []
+        var others = 0
+        for call in [BridgeCall.reauth(service: "gmail", name: "work"), .reauth(service: "gmail", name: nil)] {
+            performBridgeCall(call, in: nil, signInAgain: { others += 1 }, addProfile: { _, _ in others += 1 },
+                              reauth: { reauths.append("\($0)|\($1 ?? "nil")") })
+        }
+        #expect(reauths == ["gmail|work", "gmail|nil"])
+        #expect(others == 0)
+    }
+}
+
 /// Calls the bridge received, on the main actor.
 @MainActor final class CallLog {
     var calls: [BridgeCall] = []

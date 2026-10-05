@@ -52,6 +52,21 @@ struct ProfileSetupTests {
     @Test func aQuestionItCannotShowStopsTheRun() throws {
         #expect(throws: unreadableSetup) { try setupEvent(try event(#"{"v":1,"event":"ask","id":"x","label":"X","kind":"hologram"}"#)) }
         #expect(throws: unreadableSetup) { try setupEvent(try event(#"{"v":1,"event":"added"}"#)) }
+        #expect(throws: unreadableSetup) { try setupEvent(try event(#"{"v":1,"event":"reauthed","service":"gmail"}"#)) }
+        #expect(throws: unreadableSetup) { try setupEvent(try event(#"{"v":1,"event":"reauthed","service":"gmail","profile":""}"#)) }
+    }
+
+    @Test func readsTheEndOfASignInAgain() throws {
+        #expect(try setupEvent(try event(#"{"v":1,"event":"reauthed","service":"gmail","profile":"pa@hex-rays.com"}"#)) == .reauthed(profile: "pa@hex-rays.com"))
+    }
+
+    @Test func aProfileNameIsOneArgumentThatIsNotAnOption() {
+        for name in ["work", "pa@hex-rays.com", "my \"quoted\" 'name'", "a-b", String(repeating: "a", count: 200), "été"] {
+            #expect(isProfileName(name), "name: \(name)")
+        }
+        for name in ["", "-x", "--json", "-", "a\nb", "a\rb", "\n", String(repeating: "a", count: 201)] {
+            #expect(!isProfileName(name), "name: \(name)")
+        }
     }
 }
 
@@ -157,5 +172,82 @@ struct ProfileAddTests {
         let dir = try TempDir(); defer { dir.cleanUp() }
         let cli = try fakeCli(dir, #"read v; echo '{"v":1,"event":"ask","id":"x","label":"X","kind":"hologram"}'; exec sleep 30"#)
         await #expect(throws: unreadableSetup) { try await cli.startProfileAdd("gmail", values: [:], readOnly: false) { _ in }.finished() }
+    }
+}
+
+struct ProfileReauthTests {
+    @Test func passesServiceAndNameAsSeparateArgumentsAndEndsWithTheProfile() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = try fakeCli(dir, """
+        printf '%s\\n' "$@" > "$HOME/args"
+        echo '{"v":1,"event":"open","url":"https://accounts.google.com/x"}'
+        echo '{"v":1,"event":"reauthed","service":"gmail","profile":"my \\"work\\" profile; rm -rf"}'
+        """)
+        let log = SetupLog()
+        let run = try cli.startProfileReauth("gmail", profile: #"my "work" profile; rm -rf"#, onEvent: log.add)
+        #expect(try await run.finished() == #"my "work" profile; rm -rf"#)
+        #expect(log.events == [.open(URL(string: "https://accounts.google.com/x")!), .reauthed(profile: #"my "work" profile; rm -rf"#)])
+        #expect(dir.read("home/args") == "profile\nreauth\ngmail\n" + #"my "work" profile; rm -rf"# + "\n--json\n")
+    }
+
+    @Test func stdinCarriesOnlyTheAnswers() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = try fakeCli(dir, """
+        echo '{"v":1,"event":"ask","id":"code","label":"Code","kind":"text"}'
+        read answer; echo "$answer" > "$HOME/first-line"
+        echo '{"v":1,"event":"reauthed","service":"kite","profile":"work"}'
+        """)
+        let log = SetupLog()
+        let run = try cli.startProfileReauth("kite", profile: "work", onEvent: log.add)
+        let clock = ContinuousClock(); let deadline = clock.now + .seconds(5)
+        while log.events.isEmpty, clock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        run.answer(id: "code", value: "123")
+        #expect(try await run.finished() == "work")
+        #expect(dir.read("home/first-line") == #"{"id":"code","value":"123"}"# + "\n")
+    }
+
+    @Test func onlyReauthedEndsASignInAgain() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        // An `added` event, or a clean exit with no end at all, is not a success.
+        for script in [
+            #"echo '{"v":1,"event":"added","service":"gmail","profile":"work","readOnly":false}'"#,
+            #"exit 0"#,
+        ] {
+            let cli = try fakeCli(dir, script)
+            await #expect(throws: AgentioError.self, "script: \(script)") { try await cli.startProfileReauth("gmail", profile: "work") { _ in }.finished() }
+        }
+        // Nor does `reauthed` end an add.
+        let add = try fakeCli(dir, #"read v; echo '{"v":1,"event":"reauthed","service":"gmail","profile":"work"}'"#)
+        await #expect(throws: AgentioError.self) { try await add.startProfileAdd("gmail", values: [:], readOnly: false) { _ in }.finished() }
+    }
+
+    @Test func aFailureIsTheErrorEvent() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = try fakeCli(dir, #"echo '{"v":1,"event":"error","code":"INVALID_PARAMS","message":"gcal cannot be signed in again with --json yet","suggestion":"Run: agentio profile reauth gcal work"}'; exit 1"#)
+        await #expect(throws: AgentioError("gcal cannot be signed in again with --json yet", code: "INVALID_PARAMS", suggestion: "Run: agentio profile reauth gcal work", exitCode: 1)) {
+            try await cli.startProfileReauth("gcal", profile: "work") { _ in }.finished()
+        }
+    }
+
+    @Test func cancellingSaysSo() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = try fakeCli(dir, #"echo $$ > "$HOME/pid"; exec sleep 30"#)
+        let run = try cli.startProfileReauth("gmail", profile: "work") { _ in }
+        let clock = ContinuousClock(); let deadline = clock.now + .seconds(5)
+        while dir.read("home/pid") == nil, clock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        run.cancel()
+        await #expect(throws: AgentioError("Signing in again was cancelled", exitCode: nil)) { try await run.finished() }
+    }
+
+    @Test func anInvalidNameOrServiceIsRefusedBeforeAnythingRuns() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = try fakeCli(dir, #"touch "$HOME/ran""#)
+        for name in ["", "-x", "--json", "a\nb", String(repeating: "a", count: 201)] {
+            #expect(throws: AgentioError.self, "name: \(name)") { try cli.startProfileReauth("gmail", profile: name) { _ in } }
+        }
+        for id in ["--help", "", "Gmail", "gmail;rm", "../x", "a b", "-x"] {
+            #expect(throws: AgentioError.self, "id: \(id)") { try cli.startProfileReauth(id, profile: "work") { _ in } }
+        }
+        #expect(dir.read("home/ran") == nil)
     }
 }

@@ -14,7 +14,8 @@ public struct RootView: View {
             if let page = model.vaultPage {
                 VaultWebView(url: page, canManageProfiles: model.canManageProfiles, notice: model.pageNotice,
                              onSignInAgain: { perform(model.signInAgain) },
-                             onAddProfile: { model.addProfile(service: $0, displayName: $1) })
+                             onAddProfile: { model.addProfile(service: $0, displayName: $1) },
+                             onReauth: { model.reauthProfile(service: $0, profile: $1 ?? "") })
                     .id(model.canManageProfiles)
                     .ignoresSafeArea()
                     .frame(minWidth: 1100, minHeight: 760)

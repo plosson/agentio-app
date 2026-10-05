@@ -13,6 +13,7 @@ public protocol CompanionBackend: Sendable {
     func startLocalDaemon() async throws -> any LocalDaemon
     func describeSetup(_ service: String) async throws -> SetupNeeds?
     func startProfileAdd(_ service: String, values: [String: String], readOnly: Bool, onEvent: @escaping @Sendable (SetupEvent) -> Void) throws -> any ProfileAddRunning
+    func startProfileReauth(_ service: String, profile: String, onEvent: @escaping @Sendable (SetupEvent) -> Void) throws -> any ProfileAddRunning
 }
 
 /// A local vault daemon this app started.
