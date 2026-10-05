@@ -1,10 +1,10 @@
 # Layout
 
-Electron window geometry and region rules for AgentIO Companion.
+Window geometry and region rules for AgentIO Companion.
 
 ---
 
-## Electron window sizing
+## Window sizing
 
 | Mode | Min W×H | Default W×H | Resizable |
 |------|---------|-------------|-----------|
@@ -23,20 +23,7 @@ Switching modes may `setMinimumSize` / `setSize` in main process; avoid animatin
 
 macOS-first:
 
-```js
-// BrowserWindow (illustrative)
-{
-  titleBarStyle: 'hiddenInset',
-  trafficLightPosition: { x: 16, y: 18 }, // tune to bar height
-  // vibrancy optional — prefer solid --color-bg for predictability
-}
-```
-
-| Region | Rules |
-|--------|-------|
-| Titlebar / vault bar background | `-webkit-app-region: drag` |
-| Buttons, inputs, cards, links | `-webkit-app-region: no-drag` |
-| Traffic lights | OS-owned; leave left inset clear (**≥70px** content offset on first row if custom controls sit top-left) |
+The window is a standard SwiftUI `Window` with the system title bar and traffic lights. A custom unified title bar is later polish (spec phase F); if added, keep the traffic lights' area clear (**≥70px** content offset on the first row if custom controls sit top-left).
 
 Onboarding: no custom close buttons — use OS lights.  
 Vault bar: place host label to the **right** of traffic-light clearance.

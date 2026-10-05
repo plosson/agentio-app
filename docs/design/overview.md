@@ -2,7 +2,7 @@
 
 AgentIO Companion’s local UI (onboarding + thin vault chrome) should feel like a **macOS system utility**: calm, precise, and embedded in the desktop — not a marketing SaaS shell.
 
-Product behavior lives in [electron-companion-spec.md](../plans/electron-companion-spec.md). This doc locks the **visual principles** and **screen map** implementers must follow.
+Product behavior lives in [companion-spec.md](../plans/companion-spec.md). This doc locks the **visual principles** and **screen map** implementers must follow.
 
 ---
 

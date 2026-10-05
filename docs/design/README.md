@@ -1,31 +1,24 @@
 # AgentIO Companion — Design System
 
-**Product:** AgentIO Companion (macOS-first Electron desktop app)  
+**Product:** AgentIO Companion (native macOS app, Swift/SwiftUI)  
 **Visual direction:** System Utility Vault  
 **Status:** Source of truth for companion chrome & onboarding UI  
-**Spec:** [docs/plans/electron-companion-spec.md](../plans/electron-companion-spec.md)
+**Spec:** [docs/plans/companion-spec.md](../plans/companion-spec.md)
 
-This folder is the single look-and-feel contract for implementers. Prefer these docs over ad-hoc choices in `apps/desktop`. When rendering UI, import tokens from [`tokens.css`](./tokens.css) and match component anatomy in [`components.md`](./components.md).
+This folder is the single look-and-feel contract for implementers. Prefer these docs over ad-hoc choices in `apps/macos`. When rendering UI, use the `Theme` tokens in `apps/macos/CompanionUI/Theme.swift` (which mirror [`tokens.css`](./tokens.css)) and match component anatomy in [`components.md`](./components.md).
 
 ---
 
 ## How to use this system
 
 1. **Read the vibe** — skim [overview.md](./overview.md) principles and do/don't before touching layout or color.
-2. **Import tokens** — in renderer CSS, `@import` or copy from [`tokens.css`](./tokens.css). Do not invent new hex values; extend tokens if needed and document here.
+2. **Use tokens** — SwiftUI code uses `Theme`, which copies the values of [`tokens.css`](./tokens.css). Do not invent new hex values; add a token to `tokens.css` and `Theme.swift` together and document it here.
 3. **Build screens from components** — use [`components.md`](./components.md) + [`layout.md`](./layout.md); copy markup patterns from [`examples.md`](./examples.md).
 4. **Motion last** — follow [`motion-feedback.md`](./motion-feedback.md) for progress, checklists, busy states, and `prefers-reduced-motion`.
-5. **Migrate, don’t fork** — `apps/desktop/src/renderer/styles.css` currently uses slate + sky cyan. Replace those with these tokens; do not keep parallel palettes.
 
-### Token import note
+### Tokens in the app
 
-```css
-/* apps/desktop renderer — prefer this over hard-coded slate/sky */
-@import url("../../../../docs/design/tokens.css");
-/* or, once packaged: copy tokens.css into src/renderer/tokens.css and import locally */
-```
-
-CSS custom properties live on `:root` (light) and `@media (prefers-color-scheme: dark)` / `[data-theme="dark"]`. Electron can force theme via `data-theme` on `<html>` if the user preference should override OS.
+`tokens.css` is the source of truth for values. `apps/macos/CompanionUI/Theme.swift` copies its light and dark colours, type sizes and control sizes; the app follows the system appearance.
 
 ---
 
@@ -64,5 +57,5 @@ Away from: slate `#0f172a` / `#1e293b` panels, sky `#38bdf8` primaries, random g
 ## Ownership
 
 - Design tokens & guidelines: this folder (`docs/design/`).
-- Product behavior & screen flow: `docs/plans/electron-companion-spec.md`.
-- Implementation: `apps/desktop` (must converge on these tokens).
+- Product behavior & screen flow: `docs/plans/companion-spec.md`.
+- Implementation: `apps/macos` (`Theme.swift` mirrors these tokens).

@@ -1,4 +1,4 @@
-# AgentIO Electron Companion — Project Specification
+# AgentIO Companion — Project Specification
 
 | Field | Value |
 |-------|-------|
@@ -14,16 +14,16 @@
 
 ## 1. Locked decisions
 
-1. **Remote vault hub.** The vault and admin UI live on a remote hub (Docker AgentIO behind TLS). The hub may be **self-hosted** or **commercially hosted**. The Electron app is a laptop companion: it shows that remote UI and runs **local** OAuth when adding services.
-2. **Onboarding (first launch).** Ordered local screens: **(1)** install or update AgentIO CLI to latest → **(2)** ask for **vault URL** → **(3)** ask for **passphrase** → open vault UI. Returning users skip CLI install if already current (optional “update available”); they may land on URL or unlock depending on remembered URL.
+1. **Remote vault hub.** The vault and admin UI live on a remote hub (Docker AgentIO behind TLS). The hub may be **self-hosted** or **commercially hosted**. The macOS app is a laptop companion: it shows that remote UI and runs **local** OAuth when adding services.
+2. **Onboarding (first launch).** Ordered local screens: **(1)** ask for **vault URL** and read the hub's version from its public `/health` → **(2)** install or update the AgentIO CLI to the latest release if it is older than the hub → **(3)** ask for **passphrase** → open vault UI. Returning users skip CLI install while it is at least the hub's version; they may land on URL or unlock depending on remembered URL.
 3. **Decoupled from commercial site.** No AgentIO account login, billing, provisioning, or vault picker from a control plane in the app. Commercial hosting is optional and only yields a URL to paste in.
-4. **Same admin UI.** After unlock, Electron `loadURL`s `https://<hub>/ui`. Same `src/daemon/ui/index.html` as browsers; no companion-only admin fork; HTML is not Electron’s document origin.
-5. **Option A (companion vs browser).** Narrow `window.agentioCompanion` preload bridge (`contextIsolation: true`). Shared HTML feature-detects `present` and shows **Add profile** / **Reauth** only then. Clicks → IPC → PTY → stock CLI. Capability = bridge present — not UA or query params.
+4. **Same admin UI.** After unlock, the app's `WKWebView` loads `https://<hub>/ui`. Same `src/daemon/ui/index.html` as browsers; no companion-only admin fork; the HTML is not the app's own document.
+5. **Option A (companion vs browser).** Narrow `window.agentioCompanion` bridge (a `WKUserScript` and one `WKScriptMessageHandlerWithReply`, main frame only). Shared HTML feature-detects `present` and shows **Add profile** / **Reauth** only then. Clicks → message handler → PTY → stock CLI. Capability = bridge present — not UA or query params.
 6. **OAuth via stock CLI.** No new hub OAuth APIs. Localhost **3000–3010**. Remote mode + `--can-manage-profiles` PUTs credentials to the hub.
-7. **CLI via setup — not bundled.** Electron package does not embed AgentIO. Onboarding installs or updates to the **latest** release. Runtime opaque.
+7. **CLI via setup — not bundled.** The app bundle does not embed AgentIO. Onboarding installs or updates to the **latest** release when the CLI is older than the hub's version, so a new service or plugin needs no app update. Runtime opaque.
 8. **No local vault daemon** as the default product path.
 9. **Shared admin HTML.** One Option A change to `src/daemon/ui/index.html`; hub serve/embed parity stays green.
-10. **MVP platform:** macOS first; Windows/Linux later.
+10. **Platform:** macOS only (14 or later), native Swift/SwiftUI app. No Windows or Linux version.
 
 ---
 
@@ -56,18 +56,18 @@ A browser can unlock a remote vault and manage keys/profiles, but cannot complet
 ### 2.3 Goals
 
 - First-launch onboarding: CLI install/update, then vault URL, then passphrase.
-- No AgentIO binary inside the Electron package.
+- No AgentIO binary inside the app bundle.
 - Same remote `/ui` as browsers; companion-only Add profile / Reauth via Option A.
 - Vault secrets stay on the hub; laptop holds session cookie + manage-profiles token.
 
 ### 2.4 Non-goals (v1)
 
-- Bundling AgentIO in the Electron package.
+- Bundling AgentIO in the app bundle.
 - Account login / billing / provisioning in the app.
 - Local vault daemon as primary store.
 - Separate companion-only admin HTML or HTML as document origin.
 - New hub OAuth APIs beyond existing remote profile PUT.
-- UA/query-param gates; broad preload; mobile; WhatsApp; Hex-Rays work; merging `go-port/*` unasked.
+- UA/query-param gates; broad bridge; mobile; WhatsApp; Hex-Rays work; merging `go-port/*` unasked.
 
 ### 2.5 Success criteria (MVP)
 
@@ -239,13 +239,13 @@ Validate HTTPS (dev exception for localhost only if enabled). Optional marketing
 └─────────────────────────────────────────────────────────────┘
 ```
 
-Unlock uses the hub’s existing unlock/session path (same as browser). Passphrase is not sent through the preload bridge to page JS as a companion API — prefer driving the remote unlock UI **or** a main-process call to the hub unlock endpoint consistent with today’s `/ui` session model (implementation detail; must not widen the bridge).
+Unlock uses the hub’s existing unlock/session path (same as browser). Passphrase is not sent through the bridge to page JS as a companion API — prefer driving the remote unlock UI **or** a native call from the app to the hub unlock endpoint consistent with today’s `/ui` session model (implementation detail; must not widen the bridge).
 
 ---
 
 ### S6 — Vault window (remote admin UI + Option A)
 
-Same content as opening `https://<hub>/ui` in a browser, inside Electron, with companion controls visible:
+Same content as opening `https://<hub>/ui` in a browser, inside the app, with companion controls visible:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -301,7 +301,7 @@ Triggered by Add profile (service picker on hub HTML or a small companion sheet)
 └─────────────────────────────────────────────────────────────┘
 ```
 
-OAuth runs on localhost via the CLI; Companion does not intercept IdP redirects in the vault `BrowserWindow`.
+OAuth runs on localhost via the CLI; Companion does not intercept IdP redirects in the vault web view.
 
 ---
 
@@ -324,21 +324,21 @@ OAuth runs on localhost via the CLI; Companion does not intercept IdP redirects 
 ### 4.1 High-level
 
 ```
-┌─ Laptop (Electron Companion) ──────────────────────────────────────────┐
+┌─ Laptop (macOS Companion) ─────────────────────────────────────────────┐
 │  Onboarding (local): CLI install/update → vault URL → passphrase       │
 │                                                                        │
-│  Preload (contextIsolation)                                            │
+│  Bridge (WKUserScript, main frame only)                                │
 │    window.agentioCompanion = {                                         │
 │      present: true,                                                    │
 │      addProfile(service),                                              │
 │      reauth(service, name?),                                           │
 │      openTerminal()                                                    │
-│    }  ──IPC──► Main ──PTY──► installed agentio (remote mode)           │
+│    }  ──msg──► App  ──PTY──► installed agentio (remote mode)           │
 │                                      │                                 │
 │                                      ├─ OAuth 127.0.0.1:3000–3010      │
 │                                      └─ PUT /v1/profiles/... → hub     │
 │                                                                        │
-│  BrowserWindow ──loadURL──► https://<hub>/ui                           │
+│  WKWebView ──load──► https://<hub>/ui                                  │
 │    index.html: if (agentioCompanion?.present) show Add/Reauth          │
 │                else keep CLI footer                                    │
 └──────────────────────────────────────────────┬─────────────────────────┘
@@ -358,7 +358,7 @@ OAuth runs on localhost via the CLI; Companion does not intercept IdP redirects 
 | **Owner UI** | `loadURL` → `https://hub/ui` | Cookie `agentio_session` after unlock | Unlock, keys, profiles list, devices |
 | **Manage-profiles CLI** | Installed CLI → `https://hub/v1/...` | Bearer `agio1.…` | Remote profile add; OAuth locally |
 
-Remote page JS never receives the agent API token. Companion actions only via the narrow preload bridge.
+Remote page JS never receives the agent API token. Companion actions only via the narrow bridge.
 
 ### 4.3 Option A — bridge + conditional HTML
 
@@ -371,7 +371,7 @@ window.agentioCompanion = {
 }
 ```
 
-- `contextIsolation: true`, `nodeIntegration: false`.
+- The hub page has no native access except the bridge's message handler.
 - Forbidden on the bridge: `exec`, raw shell, arbitrary argv, token/passphrase/filesystem readback to the page.
 - Shared HTML: feature-detect `present`; browser keeps CLI footer; no UA/query gates; hub parity green; no new OAuth routes.
 
@@ -380,10 +380,10 @@ window.agentioCompanion = {
 | Component | Responsibility |
 |-----------|----------------|
 | Onboarding | S1–S5: CLI install/update, vault URL, passphrase |
-| Electron main | Windows, IPC, PTY, CLI path, release download |
-| Preload | `agentioCompanion` only |
-| Vault BrowserWindow | `loadURL(hubBase + '/ui')` |
-| Terminal panel | node-pty + xterm (S7) |
+| App (SwiftUI) | Window, onboarding state, PTY, CLI path, CLI install |
+| Bridge | `agentioCompanion` only (`WKUserScript` + message handler) |
+| Vault web view | `WKWebView` loading `hubBase + '/ui'` |
+| Terminal panel | SwiftTerm (S7) |
 | Installed `agentio` | Latest CLI on disk |
 | Hub `index.html` | Option A Add/Reauth |
 
@@ -429,13 +429,13 @@ window.agentioCompanion = {
 |----|-------------|
 | S1 | Vault + passphrase stay on the hub. |
 | S2 | Laptop: UI session cookie; hub token (0600/keychain); optional `AGENTIO_TOKEN`. |
-| S3 | `nodeIntegration: false`, `contextIsolation: true`; minimal bridge. |
+| S3 | The hub page has no native access except the bridge; minimal bridge. |
 | S4 | Production HTTPS hubs only. |
 | S5 | No iframe of admin UI. |
 | S6 | CLI from trusted releases over HTTPS; verify checksum/signature; no silent arbitrary PATH fallback without user intent. |
 | S7 | Code-sign companion; notarize macOS. |
 | S8 | PTY only via main from bridge/companion chrome. |
-| S9 | No Electron OAuth protocol handler in v1. |
+| S9 | No OAuth URL scheme handler in v1. |
 | S10 | can-manage-profiles key; risk explicit. |
 | S11 | Remote HTML untrusted for Node; XSS ≠ laptop RCE — keep bridge minimal. |
 | S12 | Capability = bridge present. |
@@ -449,8 +449,8 @@ window.agentioCompanion = {
 
 ## 10. Packaging
 
-- Signed macOS Companion first; Windows/Linux later.
-- electron-builder for the app only — no AgentIO inside the artifact.
+- Developer ID–signed, notarized macOS app (hardened runtime; no App Sandbox, because the app installs and runs the CLI).
+- Xcode archive of the app only (project generated by XcodeGen) — no AgentIO inside the bundle.
 - Onboarding installs/updates CLI; optional later “Update AgentIO CLI”.
 
 ---
@@ -477,7 +477,7 @@ window.agentioCompanion = {
 ### Phase B — Onboarding + vault window
 
 - S1–S5 local screens (CLI → URL → passphrase)
-- `loadURL` vault UI; preload stub
+- Vault UI in `WKWebView`; bridge stub
 
 ### Phase C — CLI setup + PTY
 
@@ -494,7 +494,7 @@ window.agentioCompanion = {
 
 ### Phase F — Polish
 
-- Tray, URL history, Windows/Linux, update UX
+- Menu bar item, URL history, update UX
 
 ---
 
@@ -542,4 +542,4 @@ window.agentioCompanion = {
 | 0.8 | 2026-09-25 | CLI via setup, not bundled; always latest |
 | 0.5 | 2026-09-25 | Vault URL + passphrase; Option A; remote UI; commercial out of app |
 
-Withdrawn: local-daemon companion, commercial login in app, Bun/Go matrix, embedding AgentIO in the Electron artifact.
+Withdrawn: local-daemon companion, commercial login in app, Bun/Go matrix, embedding AgentIO in the app bundle.

@@ -21,7 +21,7 @@ All interactive components support: **default · hover · active · disabled · 
 | Drag | `-webkit-app-region: drag` on chrome; `no-drag` on buttons |
 | Background | `--color-bg` (same as canvas — no separate slate bar) |
 | Border bottom | none in onboarding; vault mode may use `1px solid var(--color-border)` under vault bar |
-| Title text | Caption / tertiary; often omitted (window title set in Electron) |
+| Title text | Caption / tertiary; often omitted (window title set by the app) |
 
 **States:** chrome is non-interactive except menu `⋯` (ghost icon button, 32×32 hit).
 

@@ -20,8 +20,7 @@ public enum Screen: Equatable, Sendable {
     case vault
 }
 
-/// The onboarding's state and steps (the Electron main process and
-/// renderer, merged). Views read it and call its steps.
+/// The onboarding's state and steps. Views read it and call its steps.
 @MainActor @Observable
 public final class CompanionModel {
     public private(set) var screen: Screen = .mode

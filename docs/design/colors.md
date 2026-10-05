@@ -110,7 +110,7 @@ Targets: **≥ 4.5:1** for body text; **≥ 3:1** for large text (≥18px/14px b
 
 | Forbidden | Why |
 |-----------|-----|
-| Sky cyan `#38bdf8` / `#7dd3fc` as primary or accent | Old renderer palette; fights System Utility direction |
+| Sky cyan `#38bdf8` / `#7dd3fc` as primary or accent | Old palette; fights System Utility direction |
 | Slate panels `#0f172a`, `#1e293b`, `#334155` | SaaS “dark card” look |
 | Random gradients (purple→blue, mesh, aurora) | Marketing, not utility |
 | Pure black `#000000` full-bleed backgrounds | Harsh vs soft zinc twin |

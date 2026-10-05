@@ -13,7 +13,7 @@ AgentIO Companion uses the **system type stack** so the app reads as a macOS uti
   "Segoe UI", system-ui, Helvetica, Arial, sans-serif;
 ```
 
-- Prefer **SF Pro** on macOS (Electron resolves via `-apple-system` / system).
+- Prefer **SF Pro** on macOS (SwiftUI's system font).
 - Do not bundle Inter, Roboto, or custom display fonts for v1.
 - Optical sizing: use SF Pro Display metrics only via system; we do not ship separate face files.
 

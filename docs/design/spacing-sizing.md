@@ -52,7 +52,7 @@ See [layout.md](./layout.md) for traffic lights and drag regions.
 | `--radius-control` | **8px** | Text fields, checkboxes container, secondary buttons |
 | `--radius-card` | **12px** | Selection cards, tip/status callouts |
 | `--radius-pill` | **999px** | Primary CTA pills, ghost pills |
-| `--radius-window` | **0px** | Electron window (OS-controlled); do not fake window radius in CSS |
+| `--radius-window` | **0px** | Window (OS-controlled); do not fake window radius in CSS |
 | `--radius-progress` | **4px** | Progress bar track/fill |
 
 ---

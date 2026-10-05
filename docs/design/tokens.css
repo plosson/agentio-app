@@ -2,11 +2,7 @@
  * AgentIO Companion — design tokens
  * Source of truth: docs/design/*.md
  *
- * Import into the desktop renderer and migrate apps/desktop/src/renderer/styles.css
- * off the old slate (#0f172a/#1e293b) + sky (#38bdf8) palette onto these variables.
- *
- *   @import url("./tokens.css");
- *   /* or copy beside styles.css once packaging requires a local path */
+ * The app's Theme.swift (apps/macos/CompanionUI) copies these values.
  */
 
 :root {
@@ -153,7 +149,7 @@
   }
 }
 
-/* Explicit theme override (Electron / settings). Mirrors dark media query. */
+/* Explicit theme override (settings). Mirrors dark media query. */
 [data-theme="dark"] {
   color-scheme: dark;
 
