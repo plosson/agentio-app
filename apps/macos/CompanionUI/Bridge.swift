@@ -57,7 +57,7 @@ private struct Origin: Equatable {
         self.init(scheme: scheme, host: host, port: url.port ?? 0)
     }
 
-    init(securityOrigin: WKSecurityOrigin) {
+    @MainActor init(securityOrigin: WKSecurityOrigin) {
         self.init(scheme: securityOrigin.protocol.lowercased(), host: securityOrigin.host.lowercased(),
                   port: securityOrigin.port)
     }
@@ -87,8 +87,12 @@ final class BridgeHandler: NSObject, WKScriptMessageHandlerWithReply {
         didReceive message: WKScriptMessage,
         replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void
     ) {
-        guard message.frameInfo.isMainFrame,
-              let allowedOrigin, Origin(securityOrigin: message.frameInfo.securityOrigin) == allowedOrigin,
+        // WebKit delivers script messages on the main thread.
+        let fromHub = MainActor.assumeIsolated {
+            message.frameInfo.isMainFrame
+                && Origin(securityOrigin: message.frameInfo.securityOrigin) == allowedOrigin
+        }
+        guard fromHub, allowedOrigin != nil,
               let call = BridgeCall(message: message.body) else {
             return replyHandler(nil, "Invalid agentioCompanion call")
         }

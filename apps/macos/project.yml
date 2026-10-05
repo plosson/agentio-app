@@ -20,6 +20,7 @@ targets:
     sources: [AgentioCompanion]
     dependencies:
       - target: AgentioKit
+      - target: CompanionUI
     info:
       path: AgentioCompanion/Info.plist
       properties:
