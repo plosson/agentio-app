@@ -62,6 +62,9 @@ struct AddProfileSheet: View {
             buttons(primary: ("Done", close), cancel: nil)
         case .failed(let text):
             Text(text).foregroundStyle(Theme.danger).textSelection(.enabled)
+            if let suggestion = flow.failureSuggestion {
+                Text(suggestion).font(Theme.caption).foregroundStyle(Theme.textSecondary).textSelection(.enabled)
+            }
             buttons(primary: nil, cancel: "Close")
         }
     }

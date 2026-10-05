@@ -29,6 +29,38 @@ struct AddProfileFlowTests {
         #expect(flow.step == .failed("This key may not manage profiles"))
     }
 
+    @Test func aDescribeFailureCarriesAgentiosSuggestion() async {
+        backend.describeResult = .failure(AgentioError("Key rejected", code: "AUTH", suggestion: "Ask the hub admin for a new key"))
+        let flow = flow()
+        await flow.start()
+        #expect(flow.step == .failed("Key rejected"))
+        #expect(flow.failureSuggestion == "Ask the hub admin for a new key")
+    }
+
+    @Test func aRunFailureCarriesAgentiosSuggestion() async throws {
+        let flow = flow()
+        await flow.start()
+        flow.submit()
+        try #require(backend.addRuns.first).finish(.failure(AgentioError("No such profile", suggestion: "Add it again with: agentio kite profile add")))
+        await eventually { flow.step == .failed("No such profile") }
+        #expect(flow.failureSuggestion == "Add it again with: agentio kite profile add")
+    }
+
+    @Test func failuresWithoutASuggestionShowNone() async throws {
+        backend.describeResult = .failure(AgentioError("plain"))
+        let described = flow()
+        await described.start()
+        #expect(described.failureSuggestion == nil)
+
+        backend.describeResult = .success(SetupNeeds(inputs: [], auth: .none))
+        let run = flow()
+        await run.start()
+        run.submit()
+        try #require(backend.addRuns.first).finish(.failure(AgentioError("plain")))
+        await eventually { if case .failed = run.step { true } else { false } }
+        #expect(run.failureSuggestion == nil)
+    }
+
     @Test func theFormNeedsEveryRequiredValueAndSendsOnlyNonBlankOnes() async {
         backend.describeResult = .success(SetupNeeds(inputs: [urlInput, SetupInput(id: "note", label: "Note", kind: .text, required: false, defaultValue: nil, help: nil, choices: [])], auth: .deviceCode))
         let flow = flow()

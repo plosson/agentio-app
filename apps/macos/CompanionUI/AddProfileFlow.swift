@@ -32,6 +32,8 @@ public final class AddProfileFlow: Identifiable {
     public var readOnly = false
     public var answer = ""
     public private(set) var lastOpened: URL?
+    /// agentio's own suggestion for the failure, when it gave one.
+    public private(set) var failureSuggestion: String?
 
     private let backend: any CompanionBackend
     private let openURL: @MainActor (URL) -> Void
@@ -72,7 +74,7 @@ public final class AddProfileFlow: Identifiable {
             for input in needs.inputs { if let value = input.defaultValue { values[input.id] = value } }
             step = .form(needs)
         } catch {
-            step = .failed(message(error))
+            fail(error)
         }
     }
 
@@ -102,7 +104,7 @@ public final class AddProfileFlow: Identifiable {
             self.run = run
             Task { await finish(run) }
         } catch {
-            step = .failed(message(error))
+            fail(error)
         }
     }
 
@@ -145,8 +147,13 @@ public final class AddProfileFlow: Identifiable {
             onAdded(service, profile)
         } catch {
             guard !cancelled else { return }
-            step = .failed(message(error))
+            fail(error)
         }
+    }
+
+    private func fail(_ error: Error) {
+        failureSuggestion = (error as? AgentioError)?.suggestion
+        step = .failed(message(error))
     }
 
     private func message(_ error: Error) -> String {
