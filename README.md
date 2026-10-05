@@ -17,7 +17,7 @@ Onboarding, CLI install, hub sign-in, local vault and the vault window work. Add
 
 - macOS 14 or later, Xcode 26
 - XcodeGen: `brew install xcodegen`
-- For a remote vault: a hub whose `GET /health` reports `version` (agentio after 3.12.2)
+- For a remote vault: a hub that runs agentio 3.13.1 or later, whose `GET /health` reports `version`
 
 ## Build, test and run
 
