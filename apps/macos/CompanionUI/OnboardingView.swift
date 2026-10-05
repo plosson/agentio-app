@@ -111,7 +111,7 @@ struct ModeScreen: View {
         case nil:
             Heading("Choose a vault")
             Explanation("Checking this app’s vault…")
-        case .remote(let hub):
+        case .remote(let hub, _):
             Heading("Your vault")
             StatusBox { Text("Signed in to ") + Text(hub).font(Theme.mono) }
             Actions(busy: model.busy) {
@@ -199,7 +199,7 @@ struct LoginScreen: View {
         if let code = model.loginCode {
             Explanation("The hub’s owner must approve this computer with this code:")
             StatusBox { Text(code.userCode).font(Theme.monoDisplay).textSelection(.enabled) }
-            Explanation("If you own the hub, open its approval page here. It asks for the hub’s passphrase, the one set on the hub itself. Then choose what this computer may use; to add services from here, allow it to manage profiles.")
+            Explanation("If you own the hub, open its approval page here. It asks for the hub’s passphrase, the one set on the hub itself. The app asks to use your profiles and to add and change them; approve it there.")
             Explanation("Otherwise, send the owner this link and wait:")
             Text(code.verifyURL.absoluteString).font(Theme.mono).textSelection(.enabled)
             Actions(busy: nil) {

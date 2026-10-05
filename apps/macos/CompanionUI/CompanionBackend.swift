@@ -8,7 +8,7 @@ public protocol CompanionBackend: Sendable {
     func installCli(atLeast minimum: CliVersion, onProgress: @escaping @Sendable (InstallProgress) -> Void) async throws -> CliInfo
     func hubVersion(_ hub: String) async throws -> CliVersion
     func vaultState() async throws -> VaultState
-    func login(hub: String, name: String, onCode: @escaping @Sendable (LoginCode) -> Void) async throws
+    func login(hub: String, name: String, onCode: @escaping @Sendable (LoginCode) -> Void) async throws -> VaultState
     func initVault(passphrase: String) async throws
     func startLocalDaemon() async throws -> any LocalDaemon
 }

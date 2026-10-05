@@ -4,6 +4,13 @@ import Foundation
 /// A hub can require a newer one; see `hubVersion`.
 public let minimumCliVersion = CliVersion("3.3.0")!
 
+/// The oldest hub the app signs in to: it understands `login --scope` (agentio#125).
+public let minimumHubVersion = CliVersion("3.14.0")!
+
+/// What the app's key asks for: use and change every profile, and add,
+/// rename and remove them.
+public let loginScopes = ["profiles:write", "profiles:manage"]
+
 /// The official installer, as documented at https://agentio.houlahop.com/#install.
 public let installScriptURL = URL(string: "https://agentio.houlahop.com/install")!
 

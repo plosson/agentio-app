@@ -18,6 +18,12 @@ struct CliEvent: @unchecked Sendable {
 
     func string(_ key: String) -> String? { fields[key] as? String }
 
+    /// A JSON `true` or `false` only: a number or a string is not a boolean.
+    func bool(_ key: String) -> Bool? {
+        guard let number = fields[key] as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
+    }
+
     /// An event that ends a command unsuccessfully.
     var isFailure: Bool { ["error", "denied", "expired"].contains(name) }
 
@@ -64,7 +70,9 @@ func failure(_ result: AgentioResult, fallback: String) -> AgentioError {
 public enum VaultState: Sendable, Equatable {
     case none
     case local
-    case remote(hub: String)
+    /// `canManageProfiles`: whether the key may add and change profiles;
+    /// nil when the hub could not say (down, older, or an older CLI).
+    case remote(hub: String, canManageProfiles: Bool? = nil)
 }
 
 /// A login code to approve on the hub, and the page to approve it on.
@@ -146,7 +154,7 @@ public struct AgentioCLI: Sendable {
             guard let hub = vault.string("hub") else {
                 throw AgentioError("agentio reported a remote vault without its hub", exitCode: 0)
             }
-            return .remote(hub: hub)
+            return .remote(hub: hub, canManageProfiles: vault.bool("canManageProfiles"))
         case "local":
             return vault.fields["configured"] as? Bool == true ? .local : .none
         default:
@@ -166,11 +174,14 @@ public struct AgentioCLI: Sendable {
     /// Sign in to a hub with `agentio login --json`, which stores a key
     /// token in the CLI's home. `onCode` gets the `code` event's code and
     /// approval page as soon as it is printed. Success is the `approved`
-    /// event, confirmed with `vaultState`. The CLI gives up after its
-    /// 10-minute code expiry; the timeout only guards a hang.
-    public func login(hub: String, name: String, onCode: @escaping @Sendable (LoginCode) -> Void) async throws {
+    /// event, confirmed with `vaultState`, which it returns. It asks for
+    /// `loginScopes`. The CLI gives up after its 10-minute code expiry; the
+    /// timeout only guards a hang.
+    @discardableResult
+    public func login(hub: String, name: String, onCode: @escaping @Sendable (LoginCode) -> Void) async throws -> VaultState {
         let seen = CodeLatch()
-        let result = try await execute(["login", hub, "--json", "--name", name], timeout: .seconds(11 * 60)) { event in
+        let scopes = loginScopes.flatMap { ["--scope", $0] }
+        let result = try await execute(["login", hub, "--json", "--name", name] + scopes, timeout: .seconds(11 * 60)) { event in
             guard event.name == "code",
                   let userCode = event.string("userCode"),
                   let url = event.string("verifyUrl").flatMap(URL.init(string:)),
@@ -183,9 +194,11 @@ public struct AgentioCLI: Sendable {
         guard result.exitCode == 0, result.events.contains(where: { $0.name == "approved" }) else {
             throw failure(result, fallback: "Sign-in failed")
         }
-        guard try await vaultState() == .remote(hub: hub) else {
+        let state = try await vaultState()
+        guard case .remote(hub, _) = state else {
             throw AgentioError("agentio finished the sign-in, but does not report this hub", exitCode: 0)
         }
+        return state
     }
 }
 

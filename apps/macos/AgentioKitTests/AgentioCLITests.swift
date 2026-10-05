@@ -49,6 +49,17 @@ struct VaultStateTests {
             (#"{"v":1,"event":"vault","mode":"local","configured":true,"path":"/v.enc","exists":false}"#, .local),
             (#"{"v":1,"event":"vault","mode":"remote","hub":"https://h.example","tokenSource":"file"}"#, .remote(hub: "https://h.example")),
             (#"{"v":1,"event":"vault","mode":"local","configured":"true"}"#, .none),
+            (#"{"v":1,"event":"vault","mode":"remote","hub":"https://h.example","tokenSource":"file","canManageProfiles":true}"#,
+             .remote(hub: "https://h.example", canManageProfiles: true)),
+            (#"{"v":1,"event":"vault","mode":"remote","hub":"https://h.example","tokenSource":"file","canManageProfiles":false}"#,
+             .remote(hub: "https://h.example", canManageProfiles: false)),
+            // Anything but a JSON boolean is not an answer: the right stays unknown.
+            (#"{"v":1,"event":"vault","mode":"remote","hub":"https://h.example","tokenSource":"file","canManageProfiles":"false"}"#,
+             .remote(hub: "https://h.example", canManageProfiles: nil)),
+            (#"{"v":1,"event":"vault","mode":"remote","hub":"https://h.example","tokenSource":"file","canManageProfiles":0}"#,
+             .remote(hub: "https://h.example", canManageProfiles: nil)),
+            (#"{"v":1,"event":"vault","mode":"remote","hub":"https://h.example","tokenSource":"file","canManageProfiles":null}"#,
+             .remote(hub: "https://h.example", canManageProfiles: nil)),
         ]
         for (output, state) in outputs {
             let dir = try TempDir(); defer { dir.cleanUp() }
@@ -159,7 +170,18 @@ struct LoginTests {
         let log = CodeLog()
         try await cli.login(hub: "https://h.example", name: "AgentIO Companion on Mac's mini", onCode: log.add)
         #expect(log.codes == [LoginCode(userCode: "388P-V9XB", verifyURL: URL(string: "https://h.example/ui#authorize=388P-V9XB")!)])
-        #expect(dir.read("home/args") == "login https://h.example --json --name AgentIO Companion on Mac's mini\n")
+        #expect(dir.read("home/args") == "login https://h.example --json --name AgentIO Companion on Mac's mini --scope profiles:write --scope profiles:manage\n")
+    }
+
+    @Test func returnsTheRightTheHubGaveTheNewKey() async throws {
+        for (vault, right) in [(Self.remote.replacing("}", with: #","canManageProfiles":true}"#), Optional(true)),
+                               (Self.remote.replacing("}", with: #","canManageProfiles":false}"#), false),
+                               (Self.remote, nil)] {
+            let dir = try TempDir(); defer { dir.cleanUp() }
+            let cli = try loginCli(dir, [Self.codeEvent, Self.approved], vault: vault)
+            let state = try await cli.login(hub: "https://h.example", name: "n") { _ in }
+            #expect(state == .remote(hub: "https://h.example", canManageProfiles: right), "vault: \(vault)")
+        }
     }
 
     @Test(.timeLimit(.minutes(1))) func aCodeInAnotherFormatStopsTheSignInAtOnce() async throws {

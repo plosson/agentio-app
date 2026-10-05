@@ -3,9 +3,9 @@ import Foundation
 import Testing
 @testable import CompanionUI
 
-let installed = CliInfo(path: URL(filePath: "/app/bin/agentio"), version: "3.12.2")
+let installed = CliInfo(path: URL(filePath: "/app/bin/agentio"), version: "3.14.0")
 
-/// A scripted CompanionBackend: an installed CLI 3.12.2 and a hub 3.12.2
+/// A scripted CompanionBackend: an installed CLI 3.14.0 and a hub 3.14.0
 /// unless a test says otherwise. Sign-ins wait until the test calls
 /// `finishLogin`, or until they are cancelled.
 final class FakeBackend: CompanionBackend, @unchecked Sendable {
@@ -14,13 +14,14 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     private var _installEvents: [InstallProgress] = []
     private var _installResult: Result<CliInfo, AgentioError> = .success(installed)
     private var _installs: [CliVersion] = []
-    private var _hubVersion: Result<CliVersion, AgentioError> = .success(CliVersion("3.12.2")!)
+    private var _hubVersion: Result<CliVersion, AgentioError> = .success(CliVersion("3.14.0")!)
     private var _hubChecks: [String] = []
     private var _vaultState: Result<VaultState, AgentioError> = .success(.none)
     private var _vaultStateCalls = 0
     private var _loginCode: LoginCode?
     private var _logins: [String] = []
     private var _loginOutcome: AsyncStream<Result<Void, AgentioError>>.Continuation?
+    private var _loginRight: Bool? = true
     private var _initVault: Result<Void, AgentioError> = .success(())
     private var _passphrases: [String] = []
     private var _daemons: [FakeDaemon] = []
@@ -39,6 +40,8 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     var vaultStateCalls: Int { locked { _vaultStateCalls } }
     var loginCode: LoginCode? { get { locked { _loginCode } } set { locked { _loginCode = newValue } } }
     var logins: [String] { locked { _logins } }
+    /// The managing right a successful sign-in reports.
+    var loginRight: Bool? { get { locked { _loginRight } } set { locked { _loginRight = newValue } } }
     var initVaultResult: Result<Void, AgentioError> { get { locked { _initVault } } set { locked { _initVault = newValue } } }
     var passphrases: [String] { locked { _passphrases } }
     var daemons: [FakeDaemon] { locked { _daemons } }
@@ -65,14 +68,17 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
         return try vaultStateResult.get()
     }
 
-    func login(hub: String, name: String, onCode: @escaping @Sendable (LoginCode) -> Void) async throws {
+    func login(hub: String, name: String, onCode: @escaping @Sendable (LoginCode) -> Void) async throws -> VaultState {
         let (outcomes, continuation) = AsyncStream<Result<Void, AgentioError>>.makeStream()
         locked {
             _logins.append("\(hub)|\(name)")
             _loginOutcome = continuation
         }
         if let code = loginCode { onCode(code) }
-        for await outcome in outcomes { return try outcome.get() }
+        for await outcome in outcomes {
+            try outcome.get()
+            return .remote(hub: hub, canManageProfiles: loginRight)
+        }
         throw AgentioError("Sign-in was cancelled")
     }
 

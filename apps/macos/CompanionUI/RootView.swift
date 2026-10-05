@@ -12,7 +12,8 @@ public struct RootView: View {
     public var body: some View {
         Group {
             if let page = model.vaultPage {
-                VaultWebView(url: page)
+                VaultWebView(url: page, canManageProfiles: model.canManageProfiles) { perform(model.signInAgain) }
+                    .id(model.canManageProfiles)
                     .ignoresSafeArea()
                     .frame(minWidth: 1100, minHeight: 760)
             } else {
