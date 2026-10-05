@@ -1,0 +1,90 @@
+import Foundation
+import Testing
+import WebKit
+@testable import CompanionUI
+
+struct BridgeCallTests {
+    @Test func acceptsTheThreeCalls() {
+        #expect(BridgeCall(message: ["method": "addProfile", "args": ["gmail"]]) == .addProfile(service: "gmail"))
+        #expect(BridgeCall(message: ["method": "reauth", "args": ["gmail"]]) == .reauth(service: "gmail", name: nil))
+        #expect(BridgeCall(message: ["method": "reauth", "args": ["gmail", "work"]]) == .reauth(service: "gmail", name: "work"))
+        #expect(BridgeCall(message: ["method": "openTerminal", "args": [Any]()]) == .openTerminal)
+    }
+
+    @Test func rejectsEverythingElse() {
+        let bad: [Any] = [
+            "addProfile", ["method": "addProfile"], ["method": "addProfile", "args": "gmail"],
+            ["method": "addProfile", "args": [Any]()], ["method": "addProfile", "args": [42]],
+            ["method": "addProfile", "args": [""]], ["method": "addProfile", "args": ["a", "b"]],
+            ["method": "reauth", "args": ["gmail", NSNull()]], ["method": "openTerminal", "args": ["x"]],
+            ["method": "exec", "args": ["rm -rf /"]], ["method": "__proto__", "args": [Any]()],
+        ]
+        for body in bad {
+            #expect(BridgeCall(message: body) == nil, "body: \(body)")
+        }
+    }
+}
+
+/// Calls the bridge received, on the main actor.
+@MainActor final class CallLog {
+    var calls: [BridgeCall] = []
+}
+
+@MainActor
+struct BridgeScriptTests {
+    /// A web view with the bridge, showing `html`.
+    func page(_ html: String, log: CallLog) async throws -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        installBridge(in: configuration.userContentController, handler: BridgeHandler { log.calls.append($0) })
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.loadHTMLString(html, baseURL: URL(string: "https://h.example/ui"))
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(10)
+        while webView.isLoading || webView.url == nil {
+            guard clock.now < deadline else { throw AgentioTestTimeout() }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        return webView
+    }
+
+    @Test func pageSeesThePresentFlagAndCallsResolve() async throws {
+        let log = CallLog()
+        let webView = try await page("<html><body>hub</body></html>", log: log)
+        let present = try await webView.callAsyncJavaScript("return window.agentioCompanion.present === true", contentWorld: .page)
+        #expect(present as? Bool == true)
+        _ = try await webView.callAsyncJavaScript(
+            "await window.agentioCompanion.addProfile('gmail'); await window.agentioCompanion.reauth('gmail', null); await window.agentioCompanion.openTerminal(); return 1",
+            contentWorld: .page)
+        #expect(log.calls == [.addProfile(service: "gmail"), .reauth(service: "gmail", name: nil), .openTerminal])
+    }
+
+    @Test func malformedCallsRejectAndDoNothing() async throws {
+        let log = CallLog()
+        let webView = try await page("<html><body>hub</body></html>", log: log)
+        let outcome = try await webView.callAsyncJavaScript(
+            "try { await window.agentioCompanion.addProfile(42); return 'resolved' } catch (e) { return 'rejected' }",
+            contentWorld: .page)
+        #expect(outcome as? String == "rejected")
+        #expect(log.calls.isEmpty)
+    }
+
+    @Test func thePageCannotReplaceTheBridge() async throws {
+        let log = CallLog()
+        let webView = try await page("<html><body>hub</body></html>", log: log)
+        let result = try await webView.callAsyncJavaScript(
+            "try { window.agentioCompanion = { present: false } } catch (e) {} ; return window.agentioCompanion.present",
+            contentWorld: .page)
+        #expect(result as? Bool == true)
+    }
+
+    @Test func framesDoNotGetTheBridge() async throws {
+        let log = CallLog()
+        let webView = try await page("<html><body><iframe srcdoc='<p>x</p>'></iframe></body></html>", log: log)
+        try await Task.sleep(for: .milliseconds(200))
+        let result = try await webView.callAsyncJavaScript(
+            "return typeof document.querySelector('iframe').contentWindow.agentioCompanion", contentWorld: .page)
+        #expect(result as? String == "undefined")
+    }
+}
+
+struct AgentioTestTimeout: Error {}
