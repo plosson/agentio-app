@@ -4,7 +4,7 @@ import WebKit
 
 /// A call from the hub page's `window.agentioCompanion` (spec Option A).
 public enum BridgeCall: Equatable, Sendable {
-    case addProfile(service: String)
+    case addProfile(service: String, displayName: String?)
     case reauth(service: String, name: String?)
     case openTerminal
     /// Move the window with the mouse: the page calls it on a mouse-down in
@@ -21,7 +21,8 @@ public enum BridgeCall: Equatable, Sendable {
         let strings = args.compactMap { $0 as? String }
         guard strings.count == args.count, strings.allSatisfy({ !$0.isEmpty }) else { return nil }
         switch (method, strings.count) {
-        case ("addProfile", 1): self = .addProfile(service: strings[0])
+        case ("addProfile", 1): self = .addProfile(service: strings[0], displayName: nil)
+        case ("addProfile", 2): self = .addProfile(service: strings[0], displayName: strings[1])
         case ("reauth", 1): self = .reauth(service: strings[0], name: nil)
         case ("reauth", 2): self = .reauth(service: strings[0], name: strings[1])
         case ("openTerminal", 0): self = .openTerminal
@@ -49,7 +50,7 @@ func bridgeScript(canManageProfiles: Bool?) -> String {
     value: Object.freeze({
       present: true,
       ...(right === null ? {} : { canManageProfiles: right }),
-      addProfile: (service) => call("addProfile", [service]),
+      addProfile: (service, displayName) => call("addProfile", displayName == null ? [service] : [service, displayName]),
       reauth: (service, name) => call("reauth", name == null ? [service] : [service, name]),
       openTerminal: () => call("openTerminal", []),
       dragWindow: () => call("dragWindow", []),
@@ -124,12 +125,23 @@ final class BridgeHandler: NSObject, WKScriptMessageHandlerWithReply {
 
 private let bridgeLog = Logger(subsystem: "com.plosson.agentio-companion", category: "bridge")
 
-/// The bridge's actions, for the page in `webView`. The profile and
+/// The script that tells the hub page a profile was added. The detail is JSON, so any name is safe.
+func profilesChangedScript(_ notice: PageNotice) -> String {
+    // Each value is a JSON string literal (it escapes `/`, so `</script>` is inert); the key order is fixed.
+    func literal(_ text: String) -> String {
+        let data = try? JSONSerialization.data(withJSONObject: text, options: [.fragmentsAllowed])
+        return data.map { String(decoding: $0, as: UTF8.self) } ?? "\"\""
+    }
+    return "window.dispatchEvent(new CustomEvent('agentio:profiles-changed', { detail: { service: \(literal(notice.service)), profile: \(literal(notice.profile)) } }));"
+}
+
+/// The bridge's actions, for the page in `webView`. The reauth and
 /// terminal actions are stubs until the terminal (S7) exists.
-@MainActor func performBridgeCall(_ call: BridgeCall, in webView: HubWebView?, signInAgain: () -> Void) {
+@MainActor func performBridgeCall(_ call: BridgeCall, in webView: HubWebView?, signInAgain: () -> Void,
+                                  addProfile: (String, String?) -> Void) {
     switch call {
-    case .addProfile(let service):
-        bridgeLog.notice("[bridge stub] addProfile(\(service, privacy: .public)) — PTY later")
+    case .addProfile(let service, let displayName):
+        addProfile(service, displayName)
     case .reauth(let service, let name):
         bridgeLog.notice("[bridge stub] reauth(\(service, privacy: .public), \(name ?? "nil", privacy: .public)) — PTY later")
     case .openTerminal:

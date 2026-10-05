@@ -12,7 +12,9 @@ public struct RootView: View {
     public var body: some View {
         Group {
             if let page = model.vaultPage {
-                VaultWebView(url: page, canManageProfiles: model.canManageProfiles) { perform(model.signInAgain) }
+                VaultWebView(url: page, canManageProfiles: model.canManageProfiles, notice: model.pageNotice,
+                             onSignInAgain: { perform(model.signInAgain) },
+                             onAddProfile: { model.addProfile(service: $0, displayName: $1) })
                     .id(model.canManageProfiles)
                     .ignoresSafeArea()
                     .frame(minWidth: 1100, minHeight: 760)
