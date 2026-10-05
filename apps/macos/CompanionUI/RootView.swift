@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The app window: the app's own screens, or the bar above a hub page.
+/// The app window: the app's own screens, or the hub's page up to the top
+/// of the window, under the transparent title bar.
 public struct RootView: View {
     let model: CompanionModel
 
@@ -11,43 +12,34 @@ public struct RootView: View {
     public var body: some View {
         Group {
             if let page = model.vaultPage {
-                VStack(spacing: 0) {
-                    VaultBar(model: model)
-                    Divider()
-                    VaultWebView(url: page)
-                }
-                .frame(minWidth: 1100, minHeight: 760)
+                VaultWebView(url: page)
+                    .ignoresSafeArea()
+                    .frame(minWidth: 1100, minHeight: 760)
             } else {
                 OnboardingView(model: model)
                     .frame(minWidth: 480, minHeight: 560)
             }
         }
-        .background(Theme.bg)
+        .background(Theme.bg, ignoresSafeAreaEdges: .all)
         .navigationTitle(model.windowTitle)
         .task { await model.start() }
     }
 }
 
-/// The bar above the hub's page ("approving" and S6).
-struct VaultBar: View {
+/// The Vault menu: the actions of the old bar above the hub's page.
+public struct VaultCommands: Commands {
     let model: CompanionModel
 
-    var body: some View {
-        HStack(spacing: 12) {
-            if model.screen == .approving {
-                Text("Approve code ") + Text(model.loginCode?.userCode ?? "").font(Theme.mono)
-                    + Text(" below · waiting for approval…")
-                Spacer()
-                Button("Cancel") { model.cancelLogin() }
-            } else {
-                Text("AgentIO Companion · ") + Text(model.vaultPage?.host() ?? "").font(Theme.mono)
-                Spacer()
-                Button("Switch vault") { perform(model.switchVault) }
-            }
+    public init(model: CompanionModel) {
+        self.model = model
+    }
+
+    public var body: some Commands {
+        CommandMenu("Vault") {
+            Button("Switch Vault…") { perform(model.switchVault) }
+                .disabled(model.screen != .vault)
+            Button("Cancel Sign-in") { model.cancelLogin() }
+                .disabled(model.screen != .login && model.screen != .approving)
         }
-        .font(Theme.body)
-        .padding(.horizontal, 16)
-        .frame(height: Theme.vaultBarHeight)
-        .background(Theme.bg)
     }
 }

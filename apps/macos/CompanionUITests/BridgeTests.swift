@@ -4,11 +4,12 @@ import WebKit
 @testable import CompanionUI
 
 struct BridgeCallTests {
-    @Test func acceptsTheThreeCalls() {
+    @Test func acceptsTheFourCalls() {
         #expect(BridgeCall(message: ["method": "addProfile", "args": ["gmail"]]) == .addProfile(service: "gmail"))
         #expect(BridgeCall(message: ["method": "reauth", "args": ["gmail"]]) == .reauth(service: "gmail", name: nil))
         #expect(BridgeCall(message: ["method": "reauth", "args": ["gmail", "work"]]) == .reauth(service: "gmail", name: "work"))
         #expect(BridgeCall(message: ["method": "openTerminal", "args": [Any]()]) == .openTerminal)
+        #expect(BridgeCall(message: ["method": "dragWindow", "args": [Any]()]) == .dragWindow)
     }
 
     @Test func rejectsEverythingElse() {
@@ -17,6 +18,7 @@ struct BridgeCallTests {
             ["method": "addProfile", "args": [Any]()], ["method": "addProfile", "args": [42]],
             ["method": "addProfile", "args": [""]], ["method": "addProfile", "args": ["a", "b"]],
             ["method": "reauth", "args": ["gmail", NSNull()]], ["method": "openTerminal", "args": ["x"]],
+            ["method": "dragWindow", "args": ["x"]], ["method": "dragWindow"], ["method": "DragWindow", "args": [Any]()],
             ["method": "exec", "args": ["rm -rf /"]], ["method": "__proto__", "args": [Any]()],
         ]
         for body in bad {
@@ -53,9 +55,9 @@ struct BridgeScriptTests {
         let present = try await webView.callAsyncJavaScript("return window.agentioCompanion.present === true", contentWorld: .page)
         #expect(present as? Bool == true)
         _ = try await webView.callAsyncJavaScript(
-            "await window.agentioCompanion.addProfile('gmail'); await window.agentioCompanion.reauth('gmail', null); await window.agentioCompanion.openTerminal(); return 1",
+            "await window.agentioCompanion.addProfile('gmail'); await window.agentioCompanion.reauth('gmail', null); await window.agentioCompanion.openTerminal(); await window.agentioCompanion.dragWindow(); return 1",
             contentWorld: .page)
-        #expect(log.calls == [.addProfile(service: "gmail"), .reauth(service: "gmail", name: nil), .openTerminal])
+        #expect(log.calls == [.addProfile(service: "gmail"), .reauth(service: "gmail", name: nil), .openTerminal, .dragWindow])
     }
 
     @Test func malformedCallsRejectAndDoNothing() async throws {
@@ -76,6 +78,16 @@ struct BridgeScriptTests {
             "try { await window.agentioCompanion.openTerminal(); return 'resolved' } catch (e) { return 'rejected' }",
             contentWorld: .page)
         return (outcome as? String, log.calls)
+    }
+
+    @Test func aPageFromAnotherHostCannotDragTheWindow() async throws {
+        let log = CallLog()
+        let webView = try await page("<html><body>hub</body></html>", log: log, baseURL: "https://evil.example/ui")
+        let outcome = try await webView.callAsyncJavaScript(
+            "try { await window.agentioCompanion.dragWindow(); return 'resolved' } catch (e) { return 'rejected' }",
+            contentWorld: .page)
+        #expect(outcome as? String == "rejected")
+        #expect(log.calls.isEmpty)
     }
 
     @Test func aPageFromAnotherHostIsRejected() async throws {

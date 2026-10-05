@@ -11,8 +11,10 @@ struct AgentioCompanionApp: App {
         Window("AgentIO Companion", id: "main") {
             RootView(model: appDelegate.model)
         }
+        .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
         .defaultSize(width: 720, height: 560)
+        .commands { VaultCommands(model: appDelegate.model) }
     }
 }
 

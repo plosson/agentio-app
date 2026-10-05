@@ -9,28 +9,33 @@ struct VaultWebView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeNSView(context: Context) -> WKWebView {
+    func makeNSView(context: Context) -> HubWebView {
         let configuration = WKWebViewConfiguration()
-        installBridge(in: configuration.userContentController, handler: BridgeHandler(hubURL: url, onCall: performBridgeCall))
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.uiDelegate = context.coordinator
-        context.coordinator.loaded = url
+        let coordinator = context.coordinator
+        installBridge(in: configuration.userContentController, handler: BridgeHandler(hubURL: url) { [weak coordinator] call in
+            performBridgeCall(call, in: coordinator?.webView)
+        })
+        let webView = HubWebView(frame: .zero, configuration: configuration)
+        webView.uiDelegate = coordinator
+        coordinator.webView = webView
+        coordinator.loaded = url
         webView.load(URLRequest(url: url))
         return webView
     }
 
-    func updateNSView(_ webView: WKWebView, context: Context) {
+    func updateNSView(_ webView: HubWebView, context: Context) {
         guard context.coordinator.loaded != url else { return }
         context.coordinator.loaded = url
         webView.load(URLRequest(url: url))
     }
 
-    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+    static func dismantleNSView(_ webView: HubWebView, coordinator: Coordinator) {
         webView.configuration.userContentController.removeAllScriptMessageHandlers()
     }
 
     final class Coordinator: NSObject, WKUIDelegate {
         var loaded: URL?
+        weak var webView: HubWebView?
 
         /// window.open and target="_blank": http(s) links open in the browser.
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
@@ -42,3 +47,33 @@ struct VaultWebView: NSViewRepresentable {
         }
     }
 }
+
+/// The web view under the transparent title bar, which the page can ask to
+/// move the window.
+final class HubWebView: WKWebView {
+    /// The page's `dragWindow()` arrives a moment after its mouse-down, too
+    /// late for `performDrag(with:)`, which then may not end on mouse-up. So
+    /// the window follows the mouse here, while the button stays down.
+    func dragWindow() {
+        guard let window, CGEventSource.buttonState(.hidSystemState, button: .left) else { return }
+        let start = NSEvent.mouseLocation
+        let origin = window.frame.origin
+        // The mouse-up can come before this loop starts; a held button and
+        // the 50 ms wait end it then.
+        while CGEventSource.buttonState(.hidSystemState, button: .left) {
+            guard let event = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp, .leftMouseDown],
+                                               until: Date(timeIntervalSinceNow: 0.05),
+                                               inMode: .eventTracking, dequeue: true) else { continue }
+            guard event.type == .leftMouseDragged else {
+                // The page still gets its mouse-up, or the next press.
+                NSApp.postEvent(event, atStart: true)
+                return
+            }
+            let now = NSEvent.mouseLocation
+            var frame = window.frame
+            frame.origin = NSPoint(x: origin.x + now.x - start.x, y: origin.y + now.y - start.y)
+            window.setFrameOrigin(window.constrainFrameRect(frame, to: window.screen).origin)
+        }
+    }
+}
+
