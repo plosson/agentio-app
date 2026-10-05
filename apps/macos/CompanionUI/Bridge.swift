@@ -10,6 +10,8 @@ public enum BridgeCall: Equatable, Sendable {
     /// Move the window with the mouse: the page calls it on a mouse-down in
     /// an empty part of its headers (WKWebView ignores `app-region: drag`).
     case dragWindow
+    /// Sign in to the hub again, for a key that may manage profiles.
+    case signInAgain
 
     /// The message `bridgeScript` posts, `{ method, args }`; nil for anything else.
     public init?(message body: Any) {
@@ -24,6 +26,7 @@ public enum BridgeCall: Equatable, Sendable {
         case ("reauth", 2): self = .reauth(service: strings[0], name: strings[1])
         case ("openTerminal", 0): self = .openTerminal
         case ("dragWindow", 0): self = .dragWindow
+        case ("signInAgain", 0): self = .signInAgain
         default: return nil
         }
     }
@@ -33,23 +36,29 @@ public enum BridgeCall: Equatable, Sendable {
 let bridgeHandlerName = "agentioCompanion"
 
 /// Defines `window.agentioCompanion` in the hub page. Each method returns
-/// the promise of the handler's reply. Keep this surface narrow: no shell,
+/// the promise of the handler's reply. `canManageProfiles` is there only
+/// when the app knows the key's right. Keep this surface narrow: no shell,
 /// tokens, or passphrase APIs.
-let bridgeScript = """
+func bridgeScript(canManageProfiles: Bool?) -> String {
+    """
 (() => {
   const call = (method, args) =>
     window.webkit.messageHandlers.\(bridgeHandlerName).postMessage({ method, args });
+  const right = \(canManageProfiles.map(String.init) ?? "null");
   Object.defineProperty(window, "agentioCompanion", {
     value: Object.freeze({
       present: true,
+      ...(right === null ? {} : { canManageProfiles: right }),
       addProfile: (service) => call("addProfile", [service]),
       reauth: (service, name) => call("reauth", name == null ? [service] : [service, name]),
       openTerminal: () => call("openTerminal", []),
       dragWindow: () => call("dragWindow", []),
+      signInAgain: () => call("signInAgain", []),
     }),
   });
 })();
 """
+}
 
 /// Scheme, host and port of an origin, with the default port filled in.
 private struct Origin: Equatable {
@@ -107,8 +116,8 @@ final class BridgeHandler: NSObject, WKScriptMessageHandlerWithReply {
 }
 
 /// Add the bridge to a web view's configuration, for the page's own scripts.
-@MainActor func installBridge(in controller: WKUserContentController, handler: BridgeHandler) {
-    controller.addUserScript(WKUserScript(source: bridgeScript, injectionTime: .atDocumentStart,
+@MainActor func installBridge(in controller: WKUserContentController, canManageProfiles: Bool?, handler: BridgeHandler) {
+    controller.addUserScript(WKUserScript(source: bridgeScript(canManageProfiles: canManageProfiles), injectionTime: .atDocumentStart,
                                           forMainFrameOnly: true, in: .page))
     controller.addScriptMessageHandler(handler, contentWorld: .page, name: bridgeHandlerName)
 }
@@ -117,7 +126,7 @@ private let bridgeLog = Logger(subsystem: "com.plosson.agentio-companion", categ
 
 /// The bridge's actions, for the page in `webView`. The profile and
 /// terminal actions are stubs until the terminal (S7) exists.
-@MainActor func performBridgeCall(_ call: BridgeCall, in webView: HubWebView?) {
+@MainActor func performBridgeCall(_ call: BridgeCall, in webView: HubWebView?, signInAgain: () -> Void) {
     switch call {
     case .addProfile(let service):
         bridgeLog.notice("[bridge stub] addProfile(\(service, privacy: .public)) — PTY later")
@@ -127,5 +136,7 @@ private let bridgeLog = Logger(subsystem: "com.plosson.agentio-companion", categ
         bridgeLog.notice("[bridge stub] openTerminal() — PTY later")
     case .dragWindow:
         webView?.dragWindow()
+    case .signInAgain:
+        signInAgain()
     }
 }

@@ -32,7 +32,7 @@ struct CompanionModelTests {
         #expect(model.screen == .local)
         #expect(backend.installs == [minimumCliVersion])
         #expect(model.installPercent == 100)
-        #expect(model.installLabel == "agentio 3.12.2 is ready")
+        #expect(model.installLabel == "agentio 3.14.0 is ready")
         #expect(model.cli == installed)
     }
 
@@ -89,27 +89,30 @@ struct CompanionModelTests {
     }
 
     @Test func signInBringsTheCliUpToTheHubFirst() async {
-        backend.hubVersionResult = .success(CliVersion("3.13.0")!)
-        backend.installResult = .success(CliInfo(path: URL(filePath: "/app/bin/agentio"), version: "3.13.1"))
+        backend.hubVersionResult = .success(CliVersion("3.15.0")!)
+        backend.installResult = .success(CliInfo(path: URL(filePath: "/app/bin/agentio"), version: "3.15.1"))
         model.goRemote()
         let signIn = Task { await model.signIn(url: "https://h.example", remember: false) }
         await eventually { backend.logins.count == 1 }
         #expect(backend.hubChecks == ["https://h.example"])
-        #expect(backend.installs == [CliVersion("3.13.0")!])
+        #expect(backend.installs == [CliVersion("3.15.0")!])
         #expect(model.screen == .login)
         #expect(model.busy == nil)
         model.cancelLogin()
         await signIn.value
     }
 
-    @Test func anOldHubStillNeedsTheAppsMinimum() async {
-        backend.hubVersionResult = .success(CliVersion("3.0.0")!)
+    @Test(arguments: ["3.13.1", "3.0.0", "3.14.0-beta.1"])
+    func aHubTooOldForScopedSignInIsRefusedBeforeAnything(version: String) async {
+        backend.hubVersionResult = .success(CliVersion(version)!)
         backend.detected = CliInfo(path: URL(filePath: "/x"), version: "3.2.2")
-        let signIn = Task { await model.signIn(url: "https://h.example", remember: false) }
-        await eventually { backend.logins.count == 1 }
-        #expect(backend.installs == [minimumCliVersion])
-        model.cancelLogin()
-        await signIn.value
+        model.goRemote()
+        await model.signIn(url: "https://h.example", remember: false)
+        #expect(model.screen == .hubURL)
+        #expect(model.error == "The vault hub at https://h.example runs agentio \(version). Signing in from this app needs agentio 3.14.0 or later on the hub.")
+        #expect(backend.installs.isEmpty)
+        #expect(backend.logins.isEmpty)
+        #expect(model.busy == nil)
     }
 
     @Test func aHubThatCannotBeCheckedIsNeitherInstalledForNorSignedInTo() async {
@@ -124,12 +127,12 @@ struct CompanionModelTests {
     }
 
     @Test func aFailedInstallForTheHubGoesBackToTheURL() async {
-        backend.hubVersionResult = .success(CliVersion("3.13.0")!)
-        backend.installResult = .failure(AgentioError("The latest agentio release is 3.12.2, but this vault needs 3.13.0 or later"))
+        backend.hubVersionResult = .success(CliVersion("3.15.0")!)
+        backend.installResult = .failure(AgentioError("The latest agentio release is 3.14.0, but this vault needs 3.15.0 or later"))
         model.goRemote()
         await model.signIn(url: "https://h.example", remember: true)
         #expect(model.screen == .hubURL)
-        #expect(model.error == "The latest agentio release is 3.12.2, but this vault needs 3.13.0 or later")
+        #expect(model.error == "The latest agentio release is 3.14.0, but this vault needs 3.15.0 or later")
         #expect(backend.logins.isEmpty)
     }
 
@@ -239,13 +242,78 @@ struct CompanionModelTests {
 
     @Test func reopeningAnUpdatedHubUpdatesTheCliFirst() async {
         backend.vaultStateResult = .success(.remote(hub: "https://h.example"))
-        backend.hubVersionResult = .success(CliVersion("3.14.0")!)
-        backend.installResult = .success(CliInfo(path: URL(filePath: "/app/bin/agentio"), version: "3.14.0"))
+        backend.hubVersionResult = .success(CliVersion("3.15.0")!)
+        backend.installResult = .success(CliInfo(path: URL(filePath: "/app/bin/agentio"), version: "3.15.0"))
         await model.enterMode()
         await model.openRemoteVault()
-        #expect(backend.installs == [CliVersion("3.14.0")!])
+        #expect(backend.installs == [CliVersion("3.15.0")!])
         #expect(model.vaultPage == URL(string: "https://h.example/ui"))
         #expect(model.busy == nil)
+    }
+
+    @Test func anOlderReachableHubStillOpensAnExistingSignIn() async {
+        // Only a new sign-in needs 3.14.0: a key the app already holds keeps working.
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example"))
+        backend.hubVersionResult = .success(CliVersion("3.13.1")!)
+        await model.openRemoteVault()
+        #expect(model.vaultPage == URL(string: "https://h.example/ui"))
+        #expect(model.error == nil)
+    }
+
+    @Test(arguments: [Optional(true), false, nil])
+    func theVaultCarriesTheKeysManagingRight(right: Bool?) async {
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: right))
+        await model.openRemoteVault()
+        #expect(model.canManageProfiles == right)
+    }
+
+    @Test func aNewSignInTakesTheRightTheHubGave() async {
+        backend.loginRight = false
+        let signIn = Task { await model.signIn(url: "https://h.example", remember: false) }
+        await eventually { backend.logins.count == 1 }
+        backend.finishLogin(.success(()))
+        await signIn.value
+        #expect(model.screen == .vault)
+        #expect(model.canManageProfiles == false)
+    }
+
+    @Test func aLocalVaultHasNoManagingRightToShow() async {
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: false))
+        await model.openRemoteVault()
+        await model.switchVault()
+        await model.openLocalVault()
+        #expect(model.vaultPage == URL(string: "http://127.0.0.1:63168/ui"))
+        #expect(model.canManageProfiles == nil)
+    }
+
+    @Test(arguments: [true, false])
+    func signInAgainLeavesThePageAndSignsInToTheSameHub(remembered: Bool) async {
+        settings.rememberedHubURL = remembered ? "https://h.example" : nil
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: false))
+        backend.loginCode = code
+        await model.openRemoteVault()
+        let again = Task { await model.signInAgain() }
+        await eventually { model.loginCode == code }
+        #expect(model.vaultPage == nil)
+        #expect(model.screen == .login)
+        #expect(backend.logins == ["https://h.example|AgentIO Companion on mac"])
+        // The remembered URL is left as it was.
+        #expect(settings.rememberedHubURL == (remembered ? "https://h.example" : nil))
+        backend.finishLogin(.success(()))
+        await again.value
+        #expect(model.screen == .vault)
+        #expect(model.vaultPage == URL(string: "https://h.example/ui"))
+        #expect(model.canManageProfiles == true)
+    }
+
+    @Test func signInAgainWithoutAnOpenRemoteVaultDoesNothing() async {
+        await model.signInAgain()
+        #expect(backend.logins.isEmpty)
+        #expect(backend.hubChecks.isEmpty)
+        await model.openLocalVault()
+        await model.signInAgain()
+        #expect(backend.logins.isEmpty)
+        #expect(model.vaultPage == URL(string: "http://127.0.0.1:63168/ui"))
     }
 
     @Test func anUnreachableHubKeepsTheVaultClosed() async {

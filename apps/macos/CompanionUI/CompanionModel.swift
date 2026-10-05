@@ -38,12 +38,16 @@ public final class CompanionModel {
     public var rememberURL = true
     /// The hub page that fills the window; nil shows the app's own screens.
     public private(set) var vaultPage: URL?
+    /// Whether the hub's key may add and change profiles; nil for a local
+    /// vault, or when the hub could not say. The hub's page offers to sign
+    /// in again when it is false.
+    public private(set) var canManageProfiles: Bool?
 
     private let backend: any CompanionBackend
     private let settings: CompanionSettings
     private let allowLocalHTTP: Bool
     private let deviceName: String
-    private var loginTask: Task<Void, Error>?
+    private var loginTask: Task<VaultState, Error>?
     /// The running sign-in; a sign-in that is no longer current changes nothing.
     private var loginID: UUID?
     private var daemon: (any LocalDaemon)?
@@ -116,8 +120,13 @@ public final class CompanionModel {
     }
 
     /// The CLI version a hub needs: its own, and never below the app's minimum.
-    private func requiredCli(for hub: String) async throws -> CliVersion {
-        max(minimumCliVersion, try await backend.hubVersion(hub))
+    /// A new sign-in also needs a hub that knows `login --scope`.
+    private func requiredCli(for hub: String, signingIn: Bool = false) async throws -> CliVersion {
+        let version = try await backend.hubVersion(hub)
+        if signingIn, version < minimumHubVersion {
+            throw AgentioError("The vault hub at \(hub) runs agentio \(version). Signing in from this app needs agentio \(minimumHubVersion) or later on the hub.")
+        }
+        return max(minimumCliVersion, version)
     }
 
     // MARK: Vault choice
@@ -172,7 +181,7 @@ public final class CompanionModel {
         busy = "Checking the hub…"
         let required: CliVersion
         do {
-            required = try await requiredCli(for: hub)
+            required = try await requiredCli(for: hub, signingIn: true)
         } catch {
             if loginID == id { loginID = nil; fail(error) }
             return
@@ -201,7 +210,8 @@ public final class CompanionModel {
         loginTask = nil
         loginCode = nil
         switch result {
-        case .success:
+        case .success(let state):
+            if case .remote(_, let right) = state { canManageProfiles = right }
             showVault("\(hub)/ui")
         case .failure(let failure):
             // Failed or cancelled: drop the approval page, if it is showing.
@@ -230,13 +240,14 @@ public final class CompanionModel {
         busy = "Checking the hub…"
         defer { busy = nil }
         do {
-            guard case .remote(let hub) = try await backend.vaultState() else {
+            guard case .remote(let hub, let right) = try await backend.vaultState() else {
                 throw AgentioError("This app is not signed in to a vault hub")
             }
             let required = try await requiredCli(for: hub)
             busy = nil
             guard await ensureCli(atLeast: required) else { return }
             hubURL = hub
+            canManageProfiles = right
             showVault("\(hub)/ui")
         } catch {
             fail(error)
@@ -289,6 +300,7 @@ public final class CompanionModel {
             }
         }
         hubURL = running.url.absoluteString
+        canManageProfiles = nil
         showVault("\(hubURL)/ui")
     }
 
@@ -298,6 +310,14 @@ public final class CompanionModel {
     public func switchVault() async {
         vaultPage = nil
         await enterMode()
+    }
+
+    /// The hub's page asked for a key that may manage profiles: sign in to
+    /// the same hub again, from the app's own screens. Only for a remote vault.
+    public func signInAgain() async {
+        guard screen == .vault, hubURL != daemon?.url.absoluteString else { return }
+        vaultPage = nil
+        await signIn(url: hubURL, remember: settings.rememberedHubURL == hubURL)
     }
 
     /// Before quitting: no sign-in left polling the hub, no daemon left running.

@@ -6,14 +6,19 @@ import WebKit
 /// to the browser.
 struct VaultWebView: NSViewRepresentable {
     let url: URL
+    /// For the bridge; a change needs a new web view (the bridge is set when it is made).
+    let canManageProfiles: Bool?
+    let onSignInAgain: @MainActor () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> HubWebView {
         let configuration = WKWebViewConfiguration()
         let coordinator = context.coordinator
-        installBridge(in: configuration.userContentController, handler: BridgeHandler(hubURL: url) { [weak coordinator] call in
-            performBridgeCall(call, in: coordinator?.webView)
+        let signInAgain = onSignInAgain
+        installBridge(in: configuration.userContentController, canManageProfiles: canManageProfiles,
+                      handler: BridgeHandler(hubURL: url) { [weak coordinator] call in
+            performBridgeCall(call, in: coordinator?.webView, signInAgain: signInAgain)
         })
         let webView = HubWebView(frame: .zero, configuration: configuration)
         webView.uiDelegate = coordinator
