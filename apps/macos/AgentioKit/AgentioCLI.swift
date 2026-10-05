@@ -1,10 +1,11 @@
 import Foundation
 
 /*
- * The only place that reads the CLI's output, apart from the daemon's
- * events (Daemon.swift). Commands run with --json: one JSON object per
- * stdout line, each with the output format version `v` and an `event`
- * (agentio#87). `vault init` has no --json, so only its exit code matters.
+ * The only way the app runs its agentio (`AgentioCLI.start`): the app's own
+ * binary and environment, the same stop policy, and stdout read as --json
+ * events. One JSON object per stdout line, each with the output format
+ * version `v` and an `event` (agentio#87). `vault init` has no --json, so
+ * only its exit code and stderr matter.
  */
 
 /// The `--json` output format this app reads (agentio's JSON_OUTPUT_VERSION).
@@ -16,6 +17,9 @@ struct CliEvent: @unchecked Sendable {
     let fields: [String: Any]
 
     func string(_ key: String) -> String? { fields[key] as? String }
+
+    /// An event that ends a command unsuccessfully.
+    var isFailure: Bool { ["error", "denied", "expired"].contains(name) }
 
     /// An `error` (or `denied`, `expired`) event as an AgentioError.
     func error(exitCode: Int32?) -> AgentioError {
@@ -37,16 +41,19 @@ func parseEvent(_ line: String) throws -> CliEvent? {
     return CliEvent(name: name, fields: object)
 }
 
-/// Every event a finished command printed, in order.
-func events(in stdout: String) throws -> [CliEvent] {
-    try stdout.split(whereSeparator: \.isNewline).compactMap { try parseEvent(String($0)) }
+/// A finished agentio command: its exit code (nil when stopped), output,
+/// and the events it printed, in order.
+struct AgentioResult: Sendable {
+    var exitCode: Int32?
+    var stdout = ""
+    var stderr = ""
+    var events: [CliEvent] = []
 }
 
-/// Why a command failed: its last error event. Without one, stderr (only
+/// Why a command failed: its last failure event. Without one, stderr (only
 /// logs in JSON mode) explains a failing exit, such as an unknown option.
-func failure(_ result: RunResult, _ events: [CliEvent], fallback: String) -> AgentioError {
-    let failures: Set<String> = ["error", "denied", "expired"]
-    if let event = events.last(where: { failures.contains($0.name) }) {
+func failure(_ result: AgentioResult, fallback: String) -> AgentioError {
+    if let event = result.events.last(where: \.isFailure) {
         return event.error(exitCode: result.exitCode)
     }
     if result.exitCode == 0 { return AgentioError(fallback, exitCode: 0) }
@@ -74,7 +81,8 @@ public struct CliInfo: Sendable, Equatable {
 /// The app's own agentio: where it lives and the environment it runs in.
 public struct AgentioCLI: Sendable {
     public let location: CliLocation
-    /// The app's environment; `env` removes the user's AGENTIO_* settings.
+    /// The app's environment; the CLI gets it without the user's AGENTIO_*
+    /// settings and with its own HOME (`cliEnv`).
     public let baseEnvironment: [String: String]
 
     public init(location: CliLocation, baseEnvironment: [String: String] = ProcessInfo.processInfo.environment) {
@@ -82,18 +90,44 @@ public struct AgentioCLI: Sendable {
         self.baseEnvironment = baseEnvironment
     }
 
-    var env: [String: String] { cliEnv(location, base: baseEnvironment) }
+    /// Start the app's agentio with `arguments`. `onEvent` gets each --json
+    /// event as it is printed. A line in another format version stops the
+    /// process; its `formatError` then says why.
+    func start(
+        _ arguments: [String],
+        input: String? = nil,
+        collectsOutput: Bool = true,
+        keepsStderr: Bool = true,
+        stopGrace: Duration = .seconds(5),
+        onEvent: @escaping @Sendable (CliEvent) -> Void = { _ in }
+    ) throws -> AgentioProcess {
+        let child = ChildProcess(location.binPath, arguments, environment: cliEnv(location, base: baseEnvironment),
+                                 input: input, collectsOutput: collectsOutput, keepsStderr: keepsStderr, stopGrace: stopGrace)
+        let process = AgentioProcess(child)
+        try process.start(onEvent: onEvent)
+        return process
+    }
 
-    func options(timeout: Duration, input: String? = nil,
-                 onLine: (@Sendable (String, OutputSource) -> Void)? = nil) -> RunOptions {
-        RunOptions(environment: env, timeout: timeout, input: input, onLine: onLine)
+    /// Run the app's agentio to completion. A timeout or task cancellation
+    /// stops it (nil exit code). Throws when it cannot start, or when it
+    /// prints a format version this app cannot read.
+    func execute(
+        _ arguments: [String],
+        timeout: Duration,
+        input: String? = nil,
+        onEvent: @escaping @Sendable (CliEvent) -> Void = { _ in }
+    ) async throws -> AgentioResult {
+        let process = try start(arguments, input: input, onEvent: onEvent)
+        let exit = await process.finished(timeout: timeout)
+        if let formatError = process.formatError { throw formatError }
+        return AgentioResult(exitCode: exit.exitCode, stdout: exit.stdout, stderr: exit.stderr, events: process.events)
     }
 
     /// The installed CLI's `--version`; nil if it is missing or does not run.
     /// The first run of a new binary waits for macOS's malware scan, which
     /// takes seconds, so the timeout is generous.
     public func detect(timeout: Duration = .seconds(30)) async -> CliInfo? {
-        guard let result = try? await run(location.binPath, ["--version"], options(timeout: timeout)) else {
+        guard let result = try? await execute(["--version"], timeout: timeout) else {
             return nil
         }
         let version = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -103,10 +137,9 @@ public struct AgentioCLI: Sendable {
     /// `vault status --json`: remote mode names the hub; a local vault that
     /// is not configured yet is `none`. It never prompts.
     public func vaultState() async throws -> VaultState {
-        let result = try await run(location.binPath, ["vault", "status", "--json"], options(timeout: .seconds(30)))
-        let printed = try events(in: result.stdout)
-        guard result.exitCode == 0, let vault = printed.last(where: { $0.name == "vault" }) else {
-            throw failure(result, printed, fallback: "agentio vault status failed")
+        let result = try await execute(["vault", "status", "--json"], timeout: .seconds(30))
+        guard result.exitCode == 0, let vault = result.events.last(where: { $0.name == "vault" }) else {
+            throw failure(result, fallback: "agentio vault status failed")
         }
         switch vault.string("mode") {
         case "remote":
@@ -123,8 +156,8 @@ public struct AgentioCLI: Sendable {
 
     /// Create a local vault. The passphrase goes through stdin, never argv.
     public func initVault(passphrase: String) async throws {
-        let result = try await run(location.binPath, ["vault", "init", "--passphrase-stdin", "--no-migrate"],
-                                   options(timeout: .seconds(30), input: passphrase))
+        let result = try await execute(["vault", "init", "--passphrase-stdin", "--no-migrate"],
+                                       timeout: .seconds(30), input: passphrase)
         if result.exitCode != 0 {
             throw cliError(stderr: result.stderr, exitCode: result.exitCode, fallback: "Could not create the vault")
         }
@@ -137,24 +170,75 @@ public struct AgentioCLI: Sendable {
     /// 10-minute code expiry; the timeout only guards a hang.
     public func login(hub: String, name: String, onCode: @escaping @Sendable (LoginCode) -> Void) async throws {
         let seen = CodeLatch()
-        let result = try await run(location.binPath, ["login", hub, "--json", "--name", name],
-                                   options(timeout: .seconds(11 * 60)) { line, source in
-            guard source == .stdout, let event = try? parseEvent(line), event.name == "code",
+        let result = try await execute(["login", hub, "--json", "--name", name], timeout: .seconds(11 * 60)) { event in
+            guard event.name == "code",
                   let userCode = event.string("userCode"),
                   let url = event.string("verifyUrl").flatMap(URL.init(string:)),
                   seen.claim() else { return }
             onCode(LoginCode(userCode: userCode, verifyURL: url))
-        })
+        }
         if Task.isCancelled {
             throw AgentioError("Sign-in was cancelled", exitCode: result.exitCode)
         }
-        let printed = try events(in: result.stdout)
-        guard result.exitCode == 0, printed.contains(where: { $0.name == "approved" }) else {
-            throw failure(result, printed, fallback: "Sign-in failed")
+        guard result.exitCode == 0, result.events.contains(where: { $0.name == "approved" }) else {
+            throw failure(result, fallback: "Sign-in failed")
         }
         guard try await vaultState() == .remote(hub: hub) else {
             throw AgentioError("agentio finished the sign-in, but does not report this hub", exitCode: 0)
         }
+    }
+}
+
+/// The app's agentio while it runs: its process and the --json events it
+/// printed so far. Built only by `AgentioCLI.start`.
+final class AgentioProcess: @unchecked Sendable {
+    private let lock = NSLock()
+    private let child: ChildProcess
+    private var printed: [CliEvent] = []
+    private var unreadable = false
+
+    fileprivate init(_ child: ChildProcess) {
+        self.child = child
+    }
+
+    /// The child keeps this alive through `onLine` until it finishes.
+    fileprivate func start(onEvent: @escaping @Sendable (CliEvent) -> Void) throws {
+        try child.start { line, source in
+            guard source == .stdout else { return }
+            self.read(line, onEvent)
+        }
+    }
+
+    /// The events printed so far, in order.
+    var events: [CliEvent] { lock.withLock { printed } }
+
+    /// Set when it printed a format version this app cannot read.
+    var formatError: AgentioError? { lock.withLock { unreadable ? unreadableFormat : nil } }
+
+    func stop() { child.stop() }
+
+    func finished() async -> RunResult { await child.finished() }
+
+    func exited() async -> Int32? { await child.exited() }
+
+    func finished(timeout: Duration) async -> RunResult { await child.finished(timeout: timeout) }
+
+    /// The first line in another format version stops the process; later lines are ignored.
+    private func read(_ line: String, _ onEvent: @Sendable (CliEvent) -> Void) {
+        let event: CliEvent?
+        do {
+            event = try parseEvent(line)
+        } catch {
+            lock.withLock { unreadable = true }
+            stop()
+            return
+        }
+        guard let event, lock.withLock({ () -> Bool in
+            guard !unreadable else { return false }
+            printed.append(event)
+            return true
+        }) else { return }
+        onEvent(event)
     }
 }
 
