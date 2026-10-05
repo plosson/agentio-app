@@ -59,6 +59,34 @@ struct CompanionModelTests {
         #expect(model.pageNotice == nil)
     }
 
+    @Test func quittingDuringAnAddCancelsItAndClosesTheSheet() async throws {
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.openRemoteVault()
+        model.addProfile(service: "kite", displayName: "Kite")
+        await eventually { model.addFlow?.step == .form(SetupNeeds(inputs: [], auth: .browser)) }
+        model.addFlow?.submit()
+        let run = try #require(backend.addRuns.first)
+        await model.shutdown()
+        #expect(run.cancelled)
+        #expect(model.addFlow == nil)
+    }
+
+    @Test func closingTheSheetWhileItLoadsStopsTheDescribe() async throws {
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        backend.describeGated = true
+        await model.openRemoteVault()
+        model.addProfile(service: "kite", displayName: "Kite")
+        let flow = try #require(model.addFlow)
+        #expect(flow.step == .loading)
+        try await Task.sleep(for: .milliseconds(50)) // the describe is now waiting on the gate
+        model.closeAddFlow()
+        backend.describeGated = false
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(model.addFlow == nil)
+        #expect(flow.step != .form(SetupNeeds(inputs: [], auth: .browser)))
+        #expect(backend.startedAdds.isEmpty)
+    }
+
     // MARK: CLI
 
     @Test func aFreshAppShowsTheChoiceWithoutRunningAnything() async {

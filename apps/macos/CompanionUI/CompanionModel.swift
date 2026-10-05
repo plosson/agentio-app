@@ -65,6 +65,8 @@ public final class CompanionModel {
     /// The running sign-in; a sign-in that is no longer current changes nothing.
     private var loginID: UUID?
     private var daemon: (any LocalDaemon)?
+    /// Loading the add sheet; stopped with the sheet.
+    private var addFlowStart: Task<Void, Never>?
 
     public init(backend: any CompanionBackend, settings: CompanionSettings, allowLocalHTTP: Bool, deviceName: String,
                 openURL: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }) {
@@ -349,17 +351,20 @@ public final class CompanionModel {
             self?.pageNotice = PageNotice(id: UUID(), service: service, profile: profile)
         }
         addFlow = flow
-        Task { await flow.start() }
+        addFlowStart = Task { await flow.start() }
     }
 
     /// Close the sheet; an add still running is stopped.
     public func closeAddFlow() {
+        addFlowStart?.cancel()
+        addFlowStart = nil
         addFlow?.cancel()
         addFlow = nil
     }
 
     /// Before quitting: no sign-in left polling the hub, no daemon left running.
     public func shutdown() async {
+        closeAddFlow()
         abandonLogin()
         await daemon?.stop()
         daemon = nil

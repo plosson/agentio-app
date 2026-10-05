@@ -28,6 +28,7 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     private var _daemonError: AgentioError?
 
     private var _describe: Result<SetupNeeds?, AgentioError> = .success(SetupNeeds(inputs: [], auth: .browser))
+    private var _describeGated = false
     private var _startedAdds: [String] = []
     private var _addRuns: [FakeAddRun] = []
 
@@ -56,7 +57,13 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     var startedAdds: [String] { locked { _startedAdds } }
     var addRuns: [FakeAddRun] { locked { _addRuns } }
 
-    func describeSetup(_ service: String) async throws -> SetupNeeds? { try describeResult.get() }
+    /// While true, `describeSetup` waits (and stops when its task is cancelled).
+    var describeGated: Bool { get { locked { _describeGated } } set { locked { _describeGated = newValue } } }
+
+    func describeSetup(_ service: String) async throws -> SetupNeeds? {
+        while describeGated { try await Task.sleep(for: .milliseconds(10)) }
+        return try describeResult.get()
+    }
 
     func startProfileAdd(_ service: String, values: [String: String], readOnly: Bool, onEvent: @escaping @Sendable (SetupEvent) -> Void) throws -> any ProfileAddRunning {
         let sortedValues = values.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
