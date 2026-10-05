@@ -1,15 +1,20 @@
 import Foundation
 
 /// The hub's base URL ("https://host[:port]") from what the user typed.
-/// HTTPS only; `allowLocalHTTP` (debug builds) also accepts http://localhost
-/// and http://127.0.0.1.
+/// Without a scheme ("vault.example.com") it assumes https://. HTTPS only;
+/// `allowLocalHTTP` (debug builds) also accepts http://localhost and
+/// http://127.0.0.1 when typed with http://.
 public func normalizeHubBase(_ raw: String, allowLocalHTTP: Bool) throws -> String {
     var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    // Before trailing slashes go: "https://" alone has a scheme, not a host.
+    let typedScheme = trimmed.contains("://")
     while trimmed.hasSuffix("/") { trimmed.removeLast() }
     if trimmed.isEmpty { throw AgentioError("Vault URL is empty") }
-    guard let parts = URLComponents(string: trimmed),
+    guard let parts = URLComponents(string: typedScheme ? trimmed : "https://" + trimmed),
           let scheme = parts.scheme?.lowercased(),
-          let host = parts.host?.lowercased(), !host.isEmpty else {
+          let host = parts.host?.lowercased(), !host.isEmpty,
+          // Without a scheme, "name@host" or "mailto:x@host" is not a hub address.
+          typedScheme || (parts.user == nil && parts.password == nil) else {
         throw AgentioError("Invalid vault URL")
     }
     let isLocal = host == "localhost" || host == "127.0.0.1"
