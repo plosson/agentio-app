@@ -11,6 +11,8 @@ public protocol CompanionBackend: Sendable {
     func login(hub: String, name: String, onCode: @escaping @Sendable (LoginCode) -> Void) async throws -> VaultState
     func initVault(passphrase: String) async throws
     func startLocalDaemon() async throws -> any LocalDaemon
+    func describeSetup(_ service: String) async throws -> SetupNeeds?
+    func startProfileAdd(_ service: String, values: [String: String], readOnly: Bool, onEvent: @escaping @Sendable (SetupEvent) -> Void) throws -> any ProfileAddRunning
 }
 
 /// A local vault daemon this app started.

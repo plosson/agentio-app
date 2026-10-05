@@ -8,7 +8,10 @@ struct VaultWebView: NSViewRepresentable {
     let url: URL
     /// For the bridge; a change needs a new web view (the bridge is set when it is made).
     let canManageProfiles: Bool?
+    /// The profile just added, for the page to hear; it never makes a new web view.
+    let notice: PageNotice?
     let onSignInAgain: @MainActor () -> Void
+    let onAddProfile: @MainActor (String, String?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -16,19 +19,26 @@ struct VaultWebView: NSViewRepresentable {
         let configuration = WKWebViewConfiguration()
         let coordinator = context.coordinator
         let signInAgain = onSignInAgain
+        let addProfile = onAddProfile
         installBridge(in: configuration.userContentController, canManageProfiles: canManageProfiles,
                       handler: BridgeHandler(hubURL: url) { [weak coordinator] call in
-            performBridgeCall(call, in: coordinator?.webView, signInAgain: signInAgain)
+            performBridgeCall(call, in: coordinator?.webView, signInAgain: signInAgain, addProfile: addProfile)
         })
         let webView = HubWebView(frame: .zero, configuration: configuration)
         webView.uiDelegate = coordinator
         coordinator.webView = webView
         coordinator.loaded = url
+        // A page loaded after the add already has the profile.
+        coordinator.lastNotice = notice?.id
         webView.load(URLRequest(url: url))
         return webView
     }
 
     func updateNSView(_ webView: HubWebView, context: Context) {
+        if let notice, notice.id != context.coordinator.lastNotice {
+            context.coordinator.lastNotice = notice.id
+            webView.evaluateJavaScript(profilesChangedScript(notice))
+        }
         guard context.coordinator.loaded != url else { return }
         context.coordinator.loaded = url
         webView.load(URLRequest(url: url))
@@ -40,6 +50,7 @@ struct VaultWebView: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKUIDelegate {
         var loaded: URL?
+        var lastNotice: UUID?
         weak var webView: HubWebView?
 
         /// window.open and target="_blank": http(s) links open in the browser.

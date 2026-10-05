@@ -5,7 +5,8 @@ import WebKit
 
 struct BridgeCallTests {
     @Test func acceptsTheFiveCalls() {
-        #expect(BridgeCall(message: ["method": "addProfile", "args": ["gmail"]]) == .addProfile(service: "gmail"))
+        #expect(BridgeCall(message: ["method": "addProfile", "args": ["gmail"]]) == .addProfile(service: "gmail", displayName: nil))
+        #expect(BridgeCall(message: ["method": "addProfile", "args": ["gmail", "Gmail"]]) == .addProfile(service: "gmail", displayName: "Gmail"))
         #expect(BridgeCall(message: ["method": "reauth", "args": ["gmail"]]) == .reauth(service: "gmail", name: nil))
         #expect(BridgeCall(message: ["method": "reauth", "args": ["gmail", "work"]]) == .reauth(service: "gmail", name: "work"))
         #expect(BridgeCall(message: ["method": "openTerminal", "args": [Any]()]) == .openTerminal)
@@ -17,7 +18,7 @@ struct BridgeCallTests {
         let bad: [Any] = [
             "addProfile", ["method": "addProfile"], ["method": "addProfile", "args": "gmail"],
             ["method": "addProfile", "args": [Any]()], ["method": "addProfile", "args": [42]],
-            ["method": "addProfile", "args": [""]], ["method": "addProfile", "args": ["a", "b"]],
+            ["method": "addProfile", "args": [""]], ["method": "addProfile", "args": ["a", "b", "c"]],
             ["method": "reauth", "args": ["gmail", NSNull()]], ["method": "openTerminal", "args": ["x"]],
             ["method": "dragWindow", "args": ["x"]], ["method": "dragWindow"], ["method": "DragWindow", "args": [Any]()],
             ["method": "signInAgain", "args": ["https://evil.example"]], ["method": "signInAgain"],
@@ -59,9 +60,17 @@ struct BridgeScriptTests {
         let present = try await webView.callAsyncJavaScript("return window.agentioCompanion.present === true", contentWorld: .page)
         #expect(present as? Bool == true)
         _ = try await webView.callAsyncJavaScript(
-            "await window.agentioCompanion.addProfile('gmail'); await window.agentioCompanion.reauth('gmail', null); await window.agentioCompanion.openTerminal(); await window.agentioCompanion.dragWindow(); await window.agentioCompanion.signInAgain(); return 1",
+            "await window.agentioCompanion.addProfile('gmail', 'Gmail'); await window.agentioCompanion.reauth('gmail', null); await window.agentioCompanion.openTerminal(); await window.agentioCompanion.dragWindow(); await window.agentioCompanion.signInAgain(); return 1",
             contentWorld: .page)
-        #expect(log.calls == [.addProfile(service: "gmail"), .reauth(service: "gmail", name: nil), .openTerminal, .dragWindow, .signInAgain])
+        #expect(log.calls == [.addProfile(service: "gmail", displayName: "Gmail"), .reauth(service: "gmail", name: nil), .openTerminal, .dragWindow, .signInAgain])
+    }
+
+    @Test func theProfilesChangedEventCarriesTheProfileUnharmed() async throws {
+        let webView = try await page("<html><body><script>window.got = []; window.addEventListener('agentio:profiles-changed', (e) => window.got.push(e.detail));</script></body></html>", log: CallLog())
+        let notice = PageNotice(id: UUID(), service: "gmail", profile: #"a"b'c</script><b>@x"#)
+        _ = try await webView.evaluateJavaScript(profilesChangedScript(notice))
+        let got = try await webView.callAsyncJavaScript("return JSON.stringify(window.got)", contentWorld: .page)
+        #expect(got as? String == #"[{"service":"gmail","profile":"a\"b'c</script><b>@x"}]"#)
     }
 
     @Test func malformedCallsRejectAndDoNothing() async throws {

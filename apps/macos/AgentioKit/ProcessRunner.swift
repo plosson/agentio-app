@@ -57,6 +57,9 @@ final class ChildProcess: @unchecked Sendable {
     private let lock = NSLock()
     private let process = Process()
     private let input: String?
+    private let keepsInputOpen: Bool
+    private var inputWriter: FileHandle?
+    private let inputQueue = DispatchQueue(label: "com.plosson.agentio-companion.stdin")
     private let collectsOutput: Bool
     private let keepsStderr: Bool
     private let stopGrace: Duration
@@ -90,6 +93,7 @@ final class ChildProcess: @unchecked Sendable {
         _ arguments: [String],
         environment: [String: String],
         input: String? = nil,
+        keepsInputOpen: Bool = false,
         collectsOutput: Bool,
         keepsStderr: Bool = true,
         stopGrace: Duration
@@ -98,6 +102,7 @@ final class ChildProcess: @unchecked Sendable {
         process.arguments = arguments
         process.environment = environment
         self.input = input
+        self.keepsInputOpen = keepsInputOpen
         self.collectsOutput = collectsOutput
         self.keepsStderr = keepsStderr
         self.stopGrace = stopGrace
@@ -109,7 +114,7 @@ final class ChildProcess: @unchecked Sendable {
         _ = ignoreSigpipe
         let outPipe = Pipe()
         let errPipe = keepsStderr ? Pipe() : nil
-        let inPipe = input == nil ? nil : Pipe()
+        let inPipe = (input == nil && !keepsInputOpen) ? nil : Pipe()
         process.standardOutput = outPipe
         process.standardError = errPipe ?? FileHandle.nullDevice
         process.standardInput = inPipe ?? FileHandle.nullDevice
@@ -139,13 +144,35 @@ final class ChildProcess: @unchecked Sendable {
             return stopRequested
         }
         if stopNow { stop() }
-        if let inPipe, let input {
-            DispatchQueue.global().async {
-                let writer = inPipe.fileHandleForWriting
-                try? writer.write(contentsOf: Data(input.utf8))
-                try? writer.close()
+        if let inPipe {
+            let writer = inPipe.fileHandleForWriting
+            if keepsInputOpen {
+                lock.withLock { inputWriter = writer }
+                if let input { writeInput(input) }
+            } else if let input {
+                DispatchQueue.global().async {
+                    try? writer.write(contentsOf: Data(input.utf8))
+                    try? writer.close()
+                }
             }
         }
+    }
+
+    /// More input, for a process started with `keepsInputOpen`; in order, never blocking the caller.
+    /// Ignored once the input is closed.
+    func writeInput(_ text: String) {
+        guard let writer = lock.withLock({ inputWriter }) else { return }
+        inputQueue.async { try? writer.write(contentsOf: Data(text.utf8)) }
+    }
+
+    /// End the input: a reader then sees end of file. Safe to call more than once.
+    func closeInput() {
+        let writer = lock.withLock { () -> FileHandle? in
+            defer { inputWriter = nil }
+            return inputWriter
+        }
+        guard let writer else { return }
+        inputQueue.async { try? writer.close() }
     }
 
     /// Returns once the process exited and its output is read (or abandoned
@@ -238,6 +265,7 @@ final class ChildProcess: @unchecked Sendable {
     /// A stopped process's output is abandoned once it exits; otherwise its
     /// output is read to the end, so nothing it printed before dying is lost.
     private func didExit(_ code: Int32?) {
+        closeInput()
         let (abandon, waiting) = lock.withLock {
             exited = true
             exitCode = code

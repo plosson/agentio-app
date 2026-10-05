@@ -104,13 +104,14 @@ public struct AgentioCLI: Sendable {
     func start(
         _ arguments: [String],
         input: String? = nil,
+        keepsInputOpen: Bool = false,
         collectsOutput: Bool = true,
         keepsStderr: Bool = true,
         stopGrace: Duration = .seconds(5),
         onEvent: @escaping @Sendable (CliEvent) -> Void = { _ in }
     ) throws -> AgentioProcess {
         let child = ChildProcess(location.binPath, arguments, environment: cliEnv(location, base: baseEnvironment),
-                                 input: input, collectsOutput: collectsOutput, keepsStderr: keepsStderr, stopGrace: stopGrace)
+                                 input: input, keepsInputOpen: keepsInputOpen, collectsOutput: collectsOutput, keepsStderr: keepsStderr, stopGrace: stopGrace)
         let process = AgentioProcess(child)
         try process.start(onEvent: onEvent)
         return process
@@ -229,6 +230,10 @@ final class AgentioProcess: @unchecked Sendable {
     var formatError: AgentioError? { lock.withLock { unreadable ? unreadableFormat : nil } }
 
     func stop() { child.stop() }
+
+    func send(_ text: String) { child.writeInput(text) }
+
+    func closeInput() { child.closeInput() }
 
     func finished() async -> RunResult { await child.finished() }
 

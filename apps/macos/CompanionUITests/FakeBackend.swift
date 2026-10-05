@@ -27,6 +27,11 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     private var _daemons: [FakeDaemon] = []
     private var _daemonError: AgentioError?
 
+    private var _describe: Result<SetupNeeds?, AgentioError> = .success(SetupNeeds(inputs: [], auth: .browser))
+    private var _describeGated = false
+    private var _startedAdds: [String] = []
+    private var _addRuns: [FakeAddRun] = []
+
     private func locked<T>(_ body: () -> T) -> T { lock.withLock(body) }
 
     var detected: CliInfo? { get { locked { _detected } } set { locked { _detected = newValue } } }
@@ -46,6 +51,29 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     var passphrases: [String] { locked { _passphrases } }
     var daemons: [FakeDaemon] { locked { _daemons } }
     var daemonError: AgentioError? { get { locked { _daemonError } } set { locked { _daemonError = newValue } } }
+
+    var describeResult: Result<SetupNeeds?, AgentioError> { get { locked { _describe } } set { locked { _describe = newValue } } }
+    /// Each started add: "service|k=v,k=v|readOnly".
+    var startedAdds: [String] { locked { _startedAdds } }
+    var addRuns: [FakeAddRun] { locked { _addRuns } }
+
+    /// While true, `describeSetup` waits (and stops when its task is cancelled).
+    var describeGated: Bool { get { locked { _describeGated } } set { locked { _describeGated = newValue } } }
+
+    func describeSetup(_ service: String) async throws -> SetupNeeds? {
+        while describeGated { try await Task.sleep(for: .milliseconds(10)) }
+        return try describeResult.get()
+    }
+
+    func startProfileAdd(_ service: String, values: [String: String], readOnly: Bool, onEvent: @escaping @Sendable (SetupEvent) -> Void) throws -> any ProfileAddRunning {
+        let sortedValues = values.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
+        let run = FakeAddRun(onEvent: onEvent)
+        locked {
+            _startedAdds.append("\(service)|\(sortedValues)|\(readOnly)")
+            _addRuns.append(run)
+        }
+        return run
+    }
 
     func detectCli() async -> CliInfo? { detected }
 
@@ -99,6 +127,37 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
         locked { _daemons.append(daemon) }
         return daemon
     }
+}
+
+/// A scripted `profile add --json` run: the test emits events and finishes it.
+final class FakeAddRun: ProfileAddRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _answers: [String] = []
+    private var _cancelled = false
+    private let outcomes: AsyncStream<Result<String, AgentioError>>
+    private let outcome: AsyncStream<Result<String, AgentioError>>.Continuation
+    let onEvent: @Sendable (SetupEvent) -> Void
+
+    init(onEvent: @escaping @Sendable (SetupEvent) -> Void) {
+        self.onEvent = onEvent
+        (outcomes, outcome) = AsyncStream.makeStream()
+    }
+
+    var answers: [String] { lock.withLock { _answers } }
+    var cancelled: Bool { lock.withLock { _cancelled } }
+
+    func answer(id: String, value: String) { lock.withLock { _answers.append("\(id)=\(value)") } }
+    func cancel() {
+        lock.withLock { _cancelled = true }
+        outcome.yield(.failure(AgentioError("Adding the profile was cancelled")))
+    }
+    func finished() async throws -> String {
+        for await result in outcomes { return try result.get() }
+        throw AgentioError("no outcome")
+    }
+
+    func emit(_ event: SetupEvent) { onEvent(event) }
+    func finish(_ result: Result<String, AgentioError>) { outcome.yield(result) }
 }
 
 final class FakeDaemon: LocalDaemon, @unchecked Sendable {
