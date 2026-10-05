@@ -35,11 +35,11 @@
   Launch Companion
        │
        ▼
-  Onboarding — CLI
-       install latest  OR  update to latest  OR  already up to date
+  Onboarding — Vault URL (read the hub's version from /health)
        │
        ▼
-  Onboarding — Vault URL
+  Onboarding — CLI
+       install latest  OR  update to latest  OR  already up to date
        │
        ▼
   Unlock — Passphrase
@@ -55,7 +55,7 @@ A browser can unlock a remote vault and manage keys/profiles, but cannot complet
 
 ### 2.3 Goals
 
-- First-launch onboarding: CLI install/update, then vault URL, then passphrase.
+- First-launch onboarding: vault URL, then CLI install/update, then passphrase.
 - No AgentIO binary inside the app bundle.
 - Same remote `/ui` as browsers; companion-only Add profile / Reauth via Option A.
 - Vault secrets stay on the hub; laptop holds session cookie + manage-profiles token.
@@ -71,7 +71,7 @@ A browser can unlock a remote vault and manage keys/profiles, but cannot complet
 
 ### 2.5 Success criteria (MVP)
 
-1. First launch walks CLI install/update → vault URL → passphrase.
+1. First launch walks vault URL → CLI install/update → passphrase.
 2. Vault window matches hub `/ui` in a browser; browser still has no companion buttons.
 3. Add profile OAuth on 3000–3010 works; profile appears on hub after refresh.
 4. Package has no AgentIO binary; self-hosted and hosted URLs both work.
@@ -85,13 +85,13 @@ Local chrome = Companion-owned windows/pages. Vault window = remote `loadURL` (h
 ### 3.0 Screen map
 
 ```
-  [S1 Welcome / CLI]
+  [S4 Vault URL] ──Continue──► [S1 Welcome / CLI]
        │ Install or Update
        ▼
   [S2 CLI progress]
        │ success
        ▼
-  [S3 CLI ready] ──Continue──► [S4 Vault URL] ──Continue──► [S5 Passphrase]
+  [S3 CLI ready] ──Continue──► [S5 Passphrase]
                                                                   │
                                                                   ▼
                                                             [S6 Vault UI]
@@ -132,7 +132,7 @@ Settings (later): change vault URL, check CLI updates, open terminal — not req
 └─────────────────────────────────────────────────────────────┘
 ```
 
-Returning launch, CLI already latest: skip to S4 (or S5 if URL remembered). Show a quiet “CLI v… · up to date” in settings, not a blocking screen.
+Returning launch, CLI at least the hub's version: skip S1–S3 and go to S5. Show a quiet “CLI v… · up to date” in settings, not a blocking screen.
 
 ---
 
@@ -156,7 +156,7 @@ Returning launch, CLI already latest: skip to S4 (or S5 if URL remembered). Show
 └─────────────────────────────────────────────────────────────┘
 ```
 
-On failure: retry + short error (network, checksum, disk). Do not continue to vault URL until CLI is usable.
+On failure: retry + short error (network, checksum, disk). Do not continue to the passphrase until CLI is usable.
 
 ---
 
@@ -308,11 +308,11 @@ OAuth runs on localhost via the CLI; Companion does not intercept IdP redirects 
 ### Returning launch (sketch)
 
 ```
-  CLI missing/outdated? ──yes──► S1/S2/S3
-         │ no
-         ▼
-  Remembered URL? ──no──► S4 → S5 → S6
+  Remembered URL? ──no──► S4 → (CLI missing/older than hub? S1/S2/S3) → S5 → S6
          │ yes
+         ▼
+  CLI missing/older than hub? ──yes──► S1/S2/S3 → S5 → S6
+         │ no
          ▼
        S5 → S6
 ```
@@ -325,7 +325,7 @@ OAuth runs on localhost via the CLI; Companion does not intercept IdP redirects 
 
 ```
 ┌─ Laptop (macOS Companion) ─────────────────────────────────────────────┐
-│  Onboarding (local): CLI install/update → vault URL → passphrase       │
+│  Onboarding (local): vault URL → CLI install/update → passphrase       │
 │                                                                        │
 │  Bridge (WKUserScript, main frame only)                                │
 │    window.agentioCompanion = {                                         │
@@ -379,7 +379,7 @@ window.agentioCompanion = {
 
 | Component | Responsibility |
 |-----------|----------------|
-| Onboarding | S1–S5: CLI install/update, vault URL, passphrase |
+| Onboarding | S1–S5: vault URL, CLI install/update, passphrase |
 | App (SwiftUI) | Window, onboarding state, PTY, CLI path, CLI install |
 | Bridge | `agentioCompanion` only (`WKUserScript` + message handler) |
 | Vault web view | `WKWebView` loading `hubBase + '/ui'` |
@@ -476,7 +476,7 @@ window.agentioCompanion = {
 
 ### Phase B — Onboarding + vault window
 
-- S1–S5 local screens (CLI → URL → passphrase)
+- S1–S5 local screens (URL → CLI → passphrase)
 - Vault UI in `WKWebView`; bridge stub
 
 ### Phase C — CLI setup + PTY
