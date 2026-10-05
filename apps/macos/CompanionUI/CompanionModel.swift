@@ -36,8 +36,16 @@ public final class CompanionModel {
     /// Nil while the vault state is being read.
     public private(set) var vault: VaultState?
     public private(set) var loginCode: LoginCode?
-    public private(set) var installPercent = 0
-    public private(set) var installLabel = ""
+    /// The app's CLI download, for the onboarding page.
+    public struct DownloadState: Equatable, Sendable {
+        public enum Phase: String, Sendable { case idle, downloading, settingUp, checking, ready, failed }
+        public var phase: Phase = .idle
+        /// 0–100 over the whole install: downloading fills 0–90, setting up is 90, checking is 95, ready is 100.
+        public var percent = 0
+        /// The installer's last lines (at most 50), for "Show details".
+        public var log: [String] = []
+    }
+    public private(set) var download = DownloadState()
     /// Shown instead of the actions while a long step runs.
     public private(set) var busy: String?
     public var error: String?
@@ -65,6 +73,10 @@ public final class CompanionModel {
     /// The running sign-in; a sign-in that is no longer current changes nothing.
     private var loginID: UUID?
     private var daemon: (any LocalDaemon)?
+    /// The latest download; a step that needs the CLI waits for it while it runs.
+    private var downloadTask: Task<Result<CliInfo, Error>, Never>?
+    /// The screen a failed download goes back to on "Try again".
+    private var downloadFrom: Screen?
     /// Loading the add sheet; stopped with the sheet.
     private var addFlowStart: Task<Void, Never>?
 
@@ -83,59 +95,105 @@ public final class CompanionModel {
         return "AgentIO Companion — \(host)\(vaultPage?.port.map { ":\($0)" } ?? "")"
     }
 
+    /// Start the CLI download if the app's CLI is missing or too old, then show the mode screen.
     public func start() async {
+        let installed = await backend.detectCli()
+        if installed?.isAtLeast(minimumCliVersion) != true {
+            startDownload(atLeast: minimumCliVersion)
+        }
         await enterMode()
     }
 
     // MARK: CLI (S2)
 
-    /// The app's CLI at `minimum` or newer. When it is missing or older,
-    /// install the latest on the installing screen. False when that fails:
-    /// the error shows on the screen it came from.
+    /// The app's CLI at `minimum` or newer. When it is missing or older, wait
+    /// for the running download, or start one, on the installing screen. False
+    /// when that fails: the screen stays, with the error.
     private func ensureCli(atLeast minimum: CliVersion) async -> Bool {
         if let installed = await backend.detectCli(), installed.isAtLeast(minimum) {
             cli = installed
             return true
         }
-        let from = screen
-        installPercent = 5
-        installLabel = "Starting…"
+        if screen != .installing { downloadFrom = screen }
         screen = .installing
-        // Progress arrives on the installer's threads; apply it in order,
-        // and all of it before the final 100%.
-        let (events, sink) = AsyncStream<InstallProgress>.makeStream()
-        let applying = Task {
-            for await event in events { applyInstallProgress(event) }
+        let running = [.downloading, .settingUp, .checking].contains(download.phase) ? downloadTask : nil
+        var outcome = await (running ?? startDownload(atLeast: minimum)).value
+        // The launch download only reached the app's minimum; this step needs more.
+        if case .success(let info) = outcome, !info.isAtLeast(minimum) {
+            outcome = await startDownload(atLeast: minimum).value
         }
-        let backend = backend
-        let outcome: Result<CliInfo, Error>
-        do {
-            outcome = .success(try await backend.installCli(atLeast: minimum) { sink.yield($0) })
-        } catch {
-            outcome = .failure(error)
-        }
-        sink.finish()
-        await applying.value
         switch outcome {
-        case .success(let info):
-            cli = info
-            installPercent = 100
-            installLabel = "agentio \(info.version) is ready"
+        case .success(let info) where info.isAtLeast(minimum):
             return true
+        case .success:
+            fail(AgentioError("agentio \(minimum) or later could not be installed"))
+            return false
         case .failure(let failure):
-            screen = from
             fail(failure)
             return false
         }
     }
 
-    /// The download's percent fills 5–95%; the ends mark start and verification.
+    /// Install the latest CLI in the background, showing its progress in `download`.
+    @discardableResult
+    private func startDownload(atLeast minimum: CliVersion) -> Task<Result<CliInfo, Error>, Never> {
+        download = DownloadState(phase: .downloading)
+        let backend = backend
+        let task = Task { () -> Result<CliInfo, Error> in
+            // Progress arrives on the installer's threads; apply it in order,
+            // and all of it before the final 100%.
+            let (events, sink) = AsyncStream<InstallProgress>.makeStream()
+            let applying = Task {
+                for await event in events { applyInstallProgress(event) }
+            }
+            let outcome: Result<CliInfo, Error>
+            do {
+                outcome = .success(try await backend.installCli(atLeast: minimum) { sink.yield($0) })
+            } catch {
+                outcome = .failure(error)
+            }
+            sink.finish()
+            await applying.value
+            switch outcome {
+            case .success(let info):
+                cli = info
+                download.phase = .ready
+                download.percent = 100
+                appendLog("agentio \(info.version) is ready")
+            case .failure:
+                download.phase = .failed
+            }
+            return outcome
+        }
+        downloadTask = task
+        return task
+    }
+
+    /// Restart a failed download in the background, and go back to the screen it failed on.
+    public func retryDownload() {
+        guard download.phase == .failed else { return }
+        error = nil
+        screen = downloadFrom ?? .mode
+        startDownload(atLeast: minimumCliVersion)
+    }
+
+    /// The download's percent fills 0–90%; setting up and checking mark 90 and 95.
     private func applyInstallProgress(_ progress: InstallProgress) {
         switch progress {
-        case .label(let text): installLabel = text
-        case .percent(let percent): installPercent = 5 + Int((min(max(percent, 0), 100) * 0.9).rounded())
-        case .checking: break
+        case .label(let text): appendLog(text)
+        case .percent(let percent):
+            let clamped = percent.isNaN ? 0 : min(max(percent, 0), 100)
+            download.phase = clamped >= 100 ? .settingUp : .downloading
+            download.percent = Int((clamped * 0.9).rounded())
+        case .checking:
+            download.phase = .checking
+            download.percent = 95
         }
+    }
+
+    private func appendLog(_ line: String) {
+        download.log.append(line)
+        if download.log.count > 50 { download.log.removeFirst(download.log.count - 50) }
     }
 
     /// The CLI version a hub needs: its own, and never below the app's minimum.
@@ -173,9 +231,9 @@ public final class CompanionModel {
         screen = .hubURL
     }
 
-    public func goLocal() async {
+    /// Show the passphrase screen at once; the CLI is needed only when the vault is created.
+    public func goLocal() {
         error = nil
-        guard await ensureCli(atLeast: minimumCliVersion) else { return }
         screen = .local
     }
 
@@ -283,6 +341,8 @@ public final class CompanionModel {
         guard passphrase == again else {
             return fail(AgentioError("The two passphrases are different"))
         }
+        guard await ensureCli(atLeast: minimumCliVersion) else { return }
+        if screen == .installing { screen = .local }
         busy = "Creating the vault and starting it…"
         defer { busy = nil }
         do {

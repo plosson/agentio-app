@@ -95,9 +95,12 @@ struct InstallingScreen: View {
 
     var body: some View {
         Heading("Setting up AgentIO CLI")
-        Text(model.installLabel).font(Theme.mono).foregroundStyle(Theme.textSecondary).lineLimit(2)
-        ProgressView(value: Double(model.installPercent), total: 100).tint(Theme.accent)
-        Text("\(model.installPercent)%").font(Theme.mono).foregroundStyle(Theme.textSecondary)
+        Text((model.download.log.last ?? "Starting…")).font(Theme.mono).foregroundStyle(Theme.textSecondary).lineLimit(2)
+        ProgressView(value: Double(model.download.percent), total: 100).tint(Theme.accent)
+        Text("\(model.download.percent)%").font(Theme.mono).foregroundStyle(Theme.textSecondary)
+        if model.download.phase == .failed {
+            Button("Try again") { model.retryDownload() }.buttonStyle(PrimaryButtonStyle())
+        }
     }
 }
 
@@ -132,7 +135,7 @@ struct ModeScreen: View {
             Explanation("A local vault keeps your credentials on this computer. A remote vault is a hub that you or your team already runs.")
             Explanation("The app installs its own copy of the AgentIO CLI, separate from any agentio you installed yourself, and keeps it up to date with your vault.")
             Actions(busy: model.busy) {
-                Button("Create a local vault") { perform(model.goLocal) }.buttonStyle(PrimaryButtonStyle())
+                Button("Create a local vault") { model.goLocal() }.buttonStyle(PrimaryButtonStyle())
                 Button("Connect to a remote vault") { model.goRemote() }.buttonStyle(SecondaryButtonStyle())
             }
         }

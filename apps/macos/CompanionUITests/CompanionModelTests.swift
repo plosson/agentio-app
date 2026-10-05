@@ -174,57 +174,123 @@ struct CompanionModelTests {
 
     // MARK: CLI
 
-    @Test func aFreshAppShowsTheChoiceWithoutRunningAnything() async {
+    @Test func aFreshAppShowsTheChoiceAndStartsTheDownload() async {
         backend.detected = nil
         await model.start()
         #expect(model.screen == .mode)
         #expect(model.vault == VaultState.none)
-        #expect(backend.vaultStateCalls == 0)
-        #expect(backend.installs.isEmpty)
-    }
-
-    @Test func installAppliesEveryProgressEventBeforeFinishing() async {
-        backend.detected = nil
-        backend.installEvents = (0..<200).map { .percent(Double($0) / 2) } + [.label("Verifying")]
-        await model.goLocal()
-        #expect(model.screen == .local)
+        await eventually { model.download.phase == .ready }
         #expect(backend.installs == [minimumCliVersion])
-        #expect(model.installPercent == 100)
-        #expect(model.installLabel == "agentio 3.14.0 is ready")
-        #expect(model.cli == installed)
-    }
-
-    @Test(arguments: [(-10.0, 5), (0, 5), (42.5, 43), (100, 95), (250, 95)])
-    func downloadPercentFillsFiveToNinetyFive(percent: Double, shown: Int) async {
-        backend.detected = nil
-        backend.installEvents = [.percent(percent)]
-        backend.installResult = .failure(AgentioError("stop here"))
-        await model.goLocal()
-        #expect(model.installPercent == shown)
-    }
-
-    @Test func failedInstallGoesBackToTheScreenItCameFrom() async {
-        await model.start()
-        backend.detected = CliInfo(path: URL(filePath: "/x"), version: "3.1.0")
-        backend.installResult = .failure(AgentioError("The installer exited with code 1: no network"))
-        await model.goLocal()
-        #expect(model.screen == .mode)
-        #expect(model.error == "The installer exited with code 1: no network")
     }
 
     @Test(arguments: ["3.12.2", "4.0.0"])
-    func aCliAtOrAboveTheMinimumIsNotReinstalled(version: String) async {
+    func aCliAtOrAboveTheMinimumIsNotDownloadedAtLaunch(version: String) async {
         backend.detected = CliInfo(path: URL(filePath: "/x"), version: version)
-        await model.goLocal()
-        #expect(model.screen == .local)
+        await model.start()
         #expect(backend.installs.isEmpty)
+        #expect(model.download.phase == .idle)
     }
 
     @Test(arguments: ["3.2.2", "3.3.0-beta.1", "garbage"])
-    func aCliBelowTheMinimumOrUnreadableIsReplaced(version: String) async {
+    func aCliBelowTheMinimumOrUnreadableIsReplacedAtLaunch(version: String) async {
         backend.detected = CliInfo(path: URL(filePath: "/x"), version: version)
-        await model.goLocal()
+        await model.start()
+        await eventually { model.download.phase == .ready }
         #expect(backend.installs == [minimumCliVersion])
+    }
+
+    @Test func progressFillsTheThreeStepsInOrder() async {
+        backend.detected = nil
+        backend.installEvents = (0..<200).map { .percent(Double($0) / 2) } + [.percent(100), .label("Installing"), .checking]
+        await model.start()
+        await eventually { model.download.phase == .ready }
+        #expect(model.download.percent == 100)
+        #expect(model.download.log.last == "agentio 3.14.0 is ready")
+        #expect(model.download.log.contains("Installing"))
+    }
+
+    @Test(arguments: [(-10.0, 0), (0, 0), (42.5, 38), (99.9, 90), (250, 90)])
+    func downloadPercentFillsZeroToNinety(percent: Double, shown: Int) async {
+        backend.detected = nil
+        backend.installEvents = [.percent(percent)]
+        backend.installResult = .failure(AgentioError("stop here"))
+        await model.start()
+        await eventually { model.download.phase == .failed }
+        #expect(model.download.percent == shown)
+    }
+
+    @Test func theLogKeepsTheLastFiftyLines() async {
+        backend.detected = nil
+        backend.installEvents = (1...80).map { .label("line \($0)") }
+        await model.start()
+        await eventually { model.download.phase == .ready }
+        #expect(model.download.log.count == 50)
+        #expect(model.download.log.first == "line 32")
+    }
+
+    @Test func choosingKeepItOnThisMacNeedsNoCliYet() async {
+        backend.detected = nil
+        backend.installGate = true            // hold the launch download open
+        await model.start()
+        model.goLocal()
+        #expect(model.screen == .local)
+        await eventually { backend.installs.count == 1 }  // the launch download only
+    }
+
+    @Test func creatingAVaultWaitsForTheRunningDownloadInsteadOfStartingAnother() async {
+        backend.detected = nil
+        backend.installGate = true
+        await model.start()
+        model.goLocal()
+        let create = Task { await model.createLocalVault(passphrase: "correct horse", again: "correct horse") }
+        await eventually { model.screen == .installing }
+        backend.detected = installed           // what the finished install leaves behind
+        backend.openInstallGate()
+        await create.value
+        #expect(backend.installs.count == 1)
+        #expect(backend.passphrases == ["correct horse"])
+    }
+
+    @Test func aFailedDownloadStaysOnItsScreenAndTryAgainGoesBack() async {
+        backend.detected = nil
+        backend.installResult = .failure(AgentioError("The installer exited with code 1: no network"))
+        await model.start()
+        await eventually { model.download.phase == .failed }
+        model.goLocal()
+        await model.createLocalVault(passphrase: "correct horse", again: "correct horse")
+        #expect(model.screen == .installing)
+        #expect(model.download.phase == .failed)
+        #expect(model.error == "The installer exited with code 1: no network")
+        #expect(backend.passphrases.isEmpty)
+        backend.installResult = .success(installed)
+        model.retryDownload()
+        #expect(model.screen == .local)
+        #expect(model.error == nil)
+        await eventually { model.download.phase == .ready }
+    }
+
+    @Test func retryDoesNothingUnlessTheDownloadFailed() async {
+        backend.detected = nil
+        backend.installGate = true
+        await model.start()
+        await eventually { backend.installs.count == 1 }
+        model.retryDownload()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(backend.installs.count == 1)
+    }
+
+    @Test func aHubNeedingANewerCliThanTheLaunchDownloadGetsOneMoreInstall() async {
+        backend.detected = nil
+        await model.start()
+        await eventually { model.download.phase == .ready }
+        backend.detected = CliInfo(path: URL(filePath: "/x"), version: "3.14.0")
+        backend.hubVersionResult = .success(CliVersion("3.20.0")!)
+        backend.installResult = .failure(AgentioError("The latest agentio release is 3.17.0, but this vault needs 3.20.0 or later"))
+        model.goRemote()
+        await model.signIn(url: "https://h.example", remember: false)
+        #expect(backend.installs == [minimumCliVersion, CliVersion("3.20.0")!])
+        #expect(model.screen == .installing)
+        #expect(model.download.phase == .failed)
     }
 
     @Test func unreadableVaultStateShowsTheChoiceAndTheError() async {
@@ -281,16 +347,6 @@ struct CompanionModelTests {
         #expect(model.error == "The vault hub at https://h.example does not report its version. Update it to the latest agentio.")
         #expect(model.busy == nil)
         #expect(backend.installs.isEmpty)
-        #expect(backend.logins.isEmpty)
-    }
-
-    @Test func aFailedInstallForTheHubGoesBackToTheURL() async {
-        backend.hubVersionResult = .success(CliVersion("3.15.0")!)
-        backend.installResult = .failure(AgentioError("The latest agentio release is 3.14.0, but this vault needs 3.15.0 or later"))
-        model.goRemote()
-        await model.signIn(url: "https://h.example", remember: true)
-        #expect(model.screen == .hubURL)
-        #expect(model.error == "The latest agentio release is 3.14.0, but this vault needs 3.15.0 or later")
         #expect(backend.logins.isEmpty)
     }
 
@@ -491,7 +547,7 @@ struct CompanionModelTests {
                       ("12345678", "12345679", "The two passphrases are different"),
                       ("", "", "The passphrase needs at least 8 characters")])
     func badPassphrasesNeverReachTheCli(passphrase: String, again: String, message: String) async {
-        await model.goLocal()
+        model.goLocal()
         await model.createLocalVault(passphrase: passphrase, again: again)
         #expect(model.error == message)
         #expect(backend.passphrases.isEmpty)
@@ -499,7 +555,7 @@ struct CompanionModelTests {
     }
 
     @Test func createLocalVaultStartsTheDaemonAndShowsItsPage() async {
-        await model.goLocal()
+        model.goLocal()
         await model.createLocalVault(passphrase: "correct horse", again: "correct horse")
         #expect(backend.passphrases == ["correct horse"])
         #expect(backend.daemons.count == 1)
@@ -510,7 +566,7 @@ struct CompanionModelTests {
 
     @Test func failedVaultCreationStartsNoDaemon() async {
         backend.initVaultResult = .failure(AgentioError("A vault already exists", code: "VAULT_EXISTS"))
-        await model.goLocal()
+        model.goLocal()
         await model.createLocalVault(passphrase: "correct horse", again: "correct horse")
         #expect(model.error == "A vault already exists")
         #expect(model.busy == nil)

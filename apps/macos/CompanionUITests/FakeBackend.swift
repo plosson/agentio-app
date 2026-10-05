@@ -14,6 +14,7 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     private var _installEvents: [InstallProgress] = []
     private var _installResult: Result<CliInfo, AgentioError> = .success(installed)
     private var _installs: [CliVersion] = []
+    private var _installGate = false
     private var _hubVersion: Result<CliVersion, AgentioError> = .success(CliVersion("3.14.0")!)
     private var _hubChecks: [String] = []
     private var _vaultState: Result<VaultState, AgentioError> = .success(.none)
@@ -38,6 +39,10 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     var detected: CliInfo? { get { locked { _detected } } set { locked { _detected = newValue } } }
     var installEvents: [InstallProgress] { get { locked { _installEvents } } set { locked { _installEvents = newValue } } }
     var installResult: Result<CliInfo, AgentioError> { get { locked { _installResult } } set { locked { _installResult = newValue } } }
+    /// While true, `installCli` waits after its events (and stops when its task is cancelled).
+    var installGate: Bool { get { locked { _installGate } } set { locked { _installGate = newValue } } }
+    /// Let the held installs finish.
+    func openInstallGate() { installGate = false }
     /// The minimum each install was asked for.
     var installs: [CliVersion] { locked { _installs } }
     var hubVersionResult: Result<CliVersion, AgentioError> { get { locked { _hubVersion } } set { locked { _hubVersion = newValue } } }
@@ -94,6 +99,7 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     func installCli(atLeast minimum: CliVersion, onProgress: @escaping @Sendable (InstallProgress) -> Void) async throws -> CliInfo {
         locked { _installs.append(minimum) }
         for event in installEvents { onProgress(event) }
+        while installGate { try await Task.sleep(for: .milliseconds(10)) }
         let info = try installResult.get()
         detected = info
         return info
