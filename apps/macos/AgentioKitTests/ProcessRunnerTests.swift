@@ -159,4 +159,39 @@ struct ProcessRunnerTests {
         let result = try await task.value
         #expect(result.exitCode == nil)
     }
+
+    @Test func anOpenInputTakesLinesWhileTheProcessRuns() async throws {
+        let log = LineLog()
+        let child = ChildProcess(sh, ["-c", "read a; echo \"got $a\"; read b; echo \"got $b\""], environment: plainEnv,
+                                 input: "one\n", keepsInputOpen: true, collectsOutput: true, stopGrace: .seconds(5))
+        try child.start(onLine: log.add)
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(5)
+        while log.lines(.stdout).isEmpty, clock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(log.lines(.stdout) == ["got one"])
+        child.writeInput("two\n")
+        let result = await child.finished(timeout: .seconds(5))
+        #expect(result.exitCode == 0)
+        #expect(log.lines(.stdout) == ["got one", "got two"])
+    }
+
+    @Test func closingTheInputEndsAReader() async throws {
+        let child = ChildProcess(sh, ["-c", "while read l; do echo \"$l\"; done; echo done"], environment: plainEnv,
+                                 keepsInputOpen: true, collectsOutput: true, stopGrace: .seconds(5))
+        try child.start(onLine: nil)
+        child.writeInput("a\n")
+        child.closeInput()
+        child.writeInput("ignored\n")
+        let result = await child.finished(timeout: .seconds(5))
+        #expect(result.stdout == "a\ndone\n")
+    }
+
+    @Test func writingAfterTheProcessExitedIsHarmless() async throws {
+        let child = ChildProcess(sh, ["-c", "exit 0"], environment: plainEnv, keepsInputOpen: true, collectsOutput: true, stopGrace: .seconds(5))
+        try child.start(onLine: nil)
+        _ = await child.finished(timeout: .seconds(5))
+        child.writeInput("late\n")
+        child.closeInput()
+        child.closeInput()
+    }
 }
