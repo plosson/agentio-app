@@ -26,18 +26,18 @@ struct EventTests {
         }
     }
 
-    @Test func failurePrefersTheLastErrorEventOverStderr() throws {
-        let stdout = """
-        {"v":1,"event":"error","code":"OLD","message":"first"}
-        {"v":1,"event":"denied","message":"The owner said no","suggestion":"Ask again"}
-        """
-        let result = RunResult(exitCode: 3, stdout: stdout, stderr: "Error [OTHER]: from stderr")
-        #expect(failure(result, try events(in: stdout), fallback: "x")
+    @Test func failurePrefersTheLastFailureEventOverStderr() throws {
+        let events = try [
+            #"{"v":1,"event":"error","code":"OLD","message":"first"}"#,
+            #"{"v":1,"event":"denied","message":"The owner said no","suggestion":"Ask again"}"#,
+            #"{"v":1,"event":"vault","mode":"local"}"#,
+        ].compactMap(parseEvent)
+        #expect(failure(AgentioResult(exitCode: 3, stderr: "Error [OTHER]: from stderr", events: events), fallback: "x")
                 == AgentioError("The owner said no", suggestion: "Ask again", exitCode: 3))
-        #expect(failure(RunResult(exitCode: 1, stdout: "", stderr: "error: unknown option '--json'"), [], fallback: "x")
+        #expect(failure(AgentioResult(exitCode: 1, stderr: "error: unknown option '--json'"), fallback: "x")
                 == AgentioError("error: unknown option '--json'", exitCode: 1))
-        #expect(failure(RunResult(exitCode: nil, stdout: "", stderr: ""), [], fallback: "x") == AgentioError("x"))
-        #expect(failure(RunResult(exitCode: 0, stdout: "", stderr: "Waiting…"), [], fallback: "x") == AgentioError("x", exitCode: 0))
+        #expect(failure(AgentioResult(exitCode: nil), fallback: "x") == AgentioError("x"))
+        #expect(failure(AgentioResult(exitCode: 0, stderr: "Waiting…"), fallback: "x") == AgentioError("x", exitCode: 0))
     }
 }
 
@@ -54,6 +54,14 @@ struct VaultStateTests {
             let dir = try TempDir(); defer { dir.cleanUp() }
             let cli = try fakeCli(dir, "echo 'agentio log line' >&2; echo '\(output)'")
             #expect(try await cli.vaultState() == state, "output: \(output)")
+        }
+    }
+
+    @Test func aLastEventWithoutANewlineIsStillRead() async throws {
+        for _ in 0..<20 {
+            let dir = try TempDir(); defer { dir.cleanUp() }
+            let cli = try fakeCli(dir, #"printf '%s' '{"v":1,"event":"vault","mode":"local","configured":true}'"#)
+            #expect(try await cli.vaultState() == .local)
         }
     }
 
@@ -154,6 +162,26 @@ struct LoginTests {
         #expect(dir.read("home/args") == "login https://h.example --json --name AgentIO Companion on Mac's mini\n")
     }
 
+    @Test(.timeLimit(.minutes(1))) func aCodeInAnotherFormatStopsTheSignInAtOnce() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = try fakeCli(dir, """
+        case "$1" in
+          login) echo $$ > "$HOME/pid"
+                 echo '{"v":2,"event":"code","userCode":"ABCD-1234","verifyUrl":"https://h.example/ui"}'
+                 exec sleep 30 ;;
+          vault) echo '\(Self.remote)' ;;
+        esac
+        """)
+        let log = CodeLog()
+        let clock = ContinuousClock()
+        let start = clock.now
+        await #expect(throws: unreadableFormat) { try await cli.login(hub: "https://h.example", name: "n", onCode: log.add) }
+        #expect(clock.now - start < .seconds(5))
+        #expect(log.codes.isEmpty)
+        let pid = try #require(dir.read("home/pid").flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
+        #expect(kill(pid, 0) != 0)
+    }
+
     @Test func ignoresCodesOnStderrAndIncompleteCodeEvents() async throws {
         let dir = try TempDir(); defer { dir.cleanUp() }
         let cli = try fakeCli(dir, """
@@ -161,14 +189,13 @@ struct LoginTests {
           login) echo '\(Self.codeEvent)' >&2
                  echo '{"v":1,"event":"code","userCode":"ABCD-1234"}'
                  echo '{"v":1,"event":"code","verifyUrl":"https://h.example/ui"}'
-                 echo '{"v":2,"event":"code","userCode":"ABCD-1234","verifyUrl":"https://h.example/ui"}'
                  echo 'Your code: ABCD-1234'
                  echo '\(Self.approved)' ;;
           vault) echo '\(Self.remote)' ;;
         esac
         """)
         let log = CodeLog()
-        await #expect(throws: AgentioError.self) { try await cli.login(hub: "https://h.example", name: "n", onCode: log.add) }
+        try await cli.login(hub: "https://h.example", name: "n", onCode: log.add)
         #expect(log.codes.isEmpty)
     }
 

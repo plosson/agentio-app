@@ -19,6 +19,15 @@ struct StartDaemonTests {
         await daemon.waitForExit()
     }
 
+    @Test func runsWithTheAppsHomeAndWithoutTheUsersAgentioSettings() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = try fakeCli(dir, #"echo "[$HOME][$AGENTIO_TOKEN][$NO_COLOR]" > "$HOME/env"; echo '\#(listening)'; exec sleep 30"#,
+                              base: ["PATH": "/usr/bin:/bin", "HOME": "/Users/someone", "AGENTIO_TOKEN": "agio1.secret"])
+        let daemon = try await cli.startDaemon()
+        await daemon.stop()
+        #expect(dir.read("home/env") == "[\(dir.url.appending(path: "home").path)][][1]\n")
+    }
+
     @Test func anEventSplitAcrossWritesIsStillRead() async throws {
         let dir = try TempDir(); defer { dir.cleanUp() }
         let half = listening.count / 2
@@ -43,6 +52,20 @@ struct StartDaemonTests {
         }
         let pid = try #require(dir.read("home/pid").flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
         #expect(kill(pid, 0) != 0)
+    }
+
+    @Test(.timeLimit(.minutes(1))) func aDeniedOrExpiredEventFailsTheStartLikeAnError() async throws {
+        for event in ["denied", "expired"] {
+            let dir = try TempDir(); defer { dir.cleanUp() }
+            let cli = try fakeCli(dir, """
+            echo $$ > "$HOME/pid"
+            echo '{"v":1,"event":"\(event)","message":"Not allowed"}'
+            exec sleep 30
+            """)
+            await #expect(throws: AgentioError("Not allowed")) { try await cli.startDaemon(startTimeout: .seconds(10)) }
+            let pid = try #require(dir.read("home/pid").flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
+            #expect(kill(pid, 0) != 0)
+        }
     }
 
     @Test func anErrorPrintedJustBeforeExitingIsNotLost() async throws {
@@ -95,6 +118,68 @@ struct StartDaemonTests {
         let start = clock.now
         await daemon.stop()
         #expect(clock.now - start < .seconds(3))
+    }
+
+    @Test(.timeLimit(.minutes(1))) func stopDoesNotWaitForAGrandchildHoldingTheOutput() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = try fakeCli(dir, "echo '\(listening)'; sleep 30 & wait")
+        let daemon = try await cli.startDaemon()
+        let clock = ContinuousClock()
+        let start = clock.now
+        await daemon.stop()
+        #expect(clock.now - start < .seconds(3))
+    }
+
+    @Test(.timeLimit(.minutes(1))) func stopDoesNotWaitForAGrandchildWhenTheDaemonExitsCleanlyOnSigterm() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = try fakeCli(dir, "trap 'exit 0' TERM; echo '\(listening)'; sleep 30 & wait")
+        let daemon = try await cli.startDaemon()
+        let clock = ContinuousClock()
+        let start = clock.now
+        await daemon.stop()
+        #expect(clock.now - start < .seconds(3))
+    }
+
+    @Test func anErrorPrintedJustBeforeACrashIsNotLost() async throws {
+        for _ in 0..<5 {
+            let dir = try TempDir(); defer { dir.cleanUp() }
+            let cli = try fakeCli(dir, #"echo '{"v":1,"event":"error","code":"BOOM","message":"Crashed"}'; kill -SEGV $$"#)
+            await #expect(throws: AgentioError("Crashed", code: "BOOM")) { try await cli.startDaemon() }
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func aDaemonThatClosesItsOutputButKeepsRunningTimesOut() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = try fakeCli(dir, #"[ "$1" = --version ] && { echo 3.12.2; exit 0; }; echo $$ > "$HOME/pid"; exec >&- 2>&-; exec sleep 30"#)
+        #expect(await cli.detect() != nil)
+        await #expect(throws: AgentioError("The agentio daemon did not start in time")) {
+            try await cli.startDaemon(startTimeout: .seconds(1))
+        }
+        let pid = try #require(dir.read("home/pid").flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
+        #expect(kill(pid, 0) != 0)
+    }
+
+    @Test(.timeLimit(.minutes(1))) func cancellingTheStartStopsTheDaemonAndSaysSo() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = try fakeCli(dir, #"[ "$1" = --version ] && { echo 3.12.2; exit 0; }; echo $$ > "$HOME/pid"; exec sleep 30"#)
+        #expect(await cli.detect() != nil)
+        let start = Task { try await cli.startDaemon() }
+        try await Task.sleep(for: .milliseconds(500))
+        start.cancel()
+        await #expect(throws: CancellationError.self) { try await start.value }
+        let pid = try #require(dir.read("home/pid").flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
+        #expect(kill(pid, 0) != 0)
+    }
+
+    @Test(.timeLimit(.minutes(1))) func waitForExitSeesADaemonThatExitsWhileAGrandchildHoldsItsOutput() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = try fakeCli(dir, "echo '\(listening)'; sleep 0.5; sleep 30 & exit 0")
+        let daemon = try await cli.startDaemon()
+        let clock = ContinuousClock()
+        let start = clock.now
+        await daemon.waitForExit()
+        #expect(clock.now - start < .seconds(3))
+        await daemon.stop()
     }
 
     @Test func stoppingTwiceIsHarmless() async throws {

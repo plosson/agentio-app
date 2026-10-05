@@ -78,6 +78,30 @@ struct ProcessRunnerTests {
         #expect(clock.now - start < .seconds(5))
     }
 
+    @Test(.timeLimit(.minutes(1))) func aTimeoutForcesACommandThatIgnoresSigterm() async throws {
+        let clock = ContinuousClock()
+        let start = clock.now
+        let result = try await run(sh, ["-c", "trap '' TERM; echo started; while true; do sleep 0.1; done"],
+                                   RunOptions(environment: plainEnv, timeout: .milliseconds(300), stopGrace: .milliseconds(300)))
+        #expect(result.exitCode == nil)
+        #expect(result.stdout == "started\n")
+        #expect(clock.now - start < .seconds(5))
+    }
+
+    @Test(.timeLimit(.minutes(1))) func cancellingForcesACommandThatIgnoresSigterm() async throws {
+        let clock = ContinuousClock()
+        let start = clock.now
+        let task = Task {
+            try await run(sh, ["-c", "trap '' TERM; while true; do sleep 0.1; done"],
+                          RunOptions(environment: plainEnv, timeout: .seconds(60), stopGrace: .milliseconds(300)))
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        task.cancel()
+        let result = try await task.value
+        #expect(result.exitCode == nil)
+        #expect(clock.now - start < .seconds(5))
+    }
+
     @Test func aGrandchildHoldingThePipesDoesNotDelayAKill() async throws {
         let clock = ContinuousClock()
         let start = clock.now
@@ -117,6 +141,14 @@ struct ProcessRunnerTests {
         let result = try await task.value
         #expect(result.exitCode == nil)
         #expect(clock.now - start < .seconds(5))
+    }
+
+    @Test(.timeLimit(.minutes(1))) func aStopBeforeStartStopsItAsSoonAsItStarts() async throws {
+        let child = ChildProcess(sh, ["-c", "exec sleep 30"], environment: plainEnv, collectsOutput: true, stopGrace: .seconds(5))
+        child.stop()
+        try child.start(onLine: nil)
+        let result = await child.finished()
+        #expect(result.exitCode == nil)
     }
 
     @Test func cancellingBeforeTheCommandStartsStillKillsIt() async throws {

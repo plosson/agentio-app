@@ -6,7 +6,7 @@ private let forcedColor: Set<String> = ["FORCE_COLOR", "CLICOLOR_FORCE"]
 /// `base` without the user's AGENTIO_* settings, which would steer the
 /// installer (AGENTIO_VERSION, AGENTIO_GITHUB_REPO…) or the CLI (an
 /// AGENTIO_TOKEN puts it in remote mode and makes `login` refuse).
-public func isolatedEnv(_ base: [String: String]) -> [String: String] {
+func isolatedEnv(_ base: [String: String]) -> [String: String] {
     var env = base.filter { !$0.key.hasPrefix("AGENTIO_") && !forcedColor.contains($0.key) }
     // Plain text: colour codes would break the lines the app reads (installer progress, CLI errors).
     env["NO_COLOR"] = "1"
@@ -14,7 +14,7 @@ public func isolatedEnv(_ base: [String: String]) -> [String: String] {
 }
 
 /// Environment for the app's CLI: isolated, with its own HOME.
-public func cliEnv(_ loc: CliLocation, base: [String: String]) -> [String: String] {
+func cliEnv(_ loc: CliLocation, base: [String: String]) -> [String: String] {
     var env = isolatedEnv(base)
     env["HOME"] = loc.homeDir.path
     return env

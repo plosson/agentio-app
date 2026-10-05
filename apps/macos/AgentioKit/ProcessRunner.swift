@@ -1,31 +1,35 @@
 import Foundation
 
-public enum OutputSource: Sendable { case stdout, stderr }
+enum OutputSource: Sendable { case stdout, stderr }
 
-public struct RunResult: Sendable, Equatable {
-    /// Nil when the command was killed (timeout or cancellation).
-    public var exitCode: Int32?
-    public var stdout: String
-    public var stderr: String
+struct RunResult: Sendable, Equatable {
+    /// Nil when a signal ended it (a stop, a timeout, a cancellation, a crash).
+    var exitCode: Int32?
+    var stdout: String
+    var stderr: String
 }
 
-public struct RunOptions: Sendable {
-    public var environment: [String: String]
-    public var timeout: Duration
+struct RunOptions: Sendable {
+    var environment: [String: String]
+    var timeout: Duration
     /// Written to stdin, which is then closed; stdin is empty otherwise.
-    public var input: String?
+    var input: String?
+    /// How long a stopped command gets to exit on SIGTERM before SIGKILL.
+    var stopGrace: Duration
     /// Called with each complete stdout/stderr line as it arrives.
-    public var onLine: (@Sendable (String, OutputSource) -> Void)?
+    var onLine: (@Sendable (String, OutputSource) -> Void)?
 
-    public init(
+    init(
         environment: [String: String],
         timeout: Duration,
         input: String? = nil,
+        stopGrace: Duration = .seconds(5),
         onLine: (@Sendable (String, OutputSource) -> Void)? = nil
     ) {
         self.environment = environment
         self.timeout = timeout
         self.input = input
+        self.stopGrace = stopGrace
         self.onLine = onLine
     }
 }
@@ -36,156 +40,232 @@ private let ignoreSigpipe: Void = { signal(SIGPIPE, SIG_IGN) }()
 
 /// Run a command to completion and collect its output. Never throws on a
 /// non-zero exit (callers read `exitCode`), only when it cannot start.
-/// A timeout or task cancellation kills it and reports a nil exit code.
-public func run(_ executable: URL, _ arguments: [String], _ options: RunOptions) async throws -> RunResult {
-    _ = ignoreSigpipe
-    let state = RunState(onLine: options.onLine)
-    return try await withTaskCancellationHandler {
-        try await withCheckedThrowingContinuation { continuation in
-            state.start(executable, arguments, options, continuation)
-        }
-    } onCancel: {
-        state.kill()
-    }
+/// A timeout or task cancellation stops it and reports a nil exit code.
+func run(_ executable: URL, _ arguments: [String], _ options: RunOptions) async throws -> RunResult {
+    let child = ChildProcess(executable, arguments, environment: options.environment, input: options.input,
+                             collectsOutput: true, stopGrace: options.stopGrace)
+    try child.start(onLine: options.onLine)
+    return await child.finished(timeout: options.timeout)
 }
 
-/// One command's process, output and completion. The lock guards every
-/// field: pipe handlers, the termination handler and kill() run on
-/// different threads.
-private final class RunState: @unchecked Sendable {
+/// One process: streams its output lines, reports its end once its output
+/// is read, and stops with SIGTERM, then SIGKILL after a grace. Every way
+/// the app runs a process goes through it, so they all stop the same way.
+/// The lock guards every field: pipe handlers, the termination handler and
+/// stop() run on different threads.
+final class ChildProcess: @unchecked Sendable {
     private let lock = NSLock()
     private let process = Process()
-    private let onLine: (@Sendable (String, OutputSource) -> Void)?
-    private var continuation: CheckedContinuation<RunResult, Error>?
+    private let input: String?
+    private let collectsOutput: Bool
+    private let keepsStderr: Bool
+    private let stopGrace: Duration
+    /// Cleared once finished, which ends the cycle with whoever it captures.
+    private var onLine: (@Sendable (String, OutputSource) -> Void)?
     private var stdout = Stream()
     private var stderr = Stream()
+    private var pipes: [Pipe] = []
     private var started = false
-    private var killRequested = false
+    private var stopRequested = false
+    private var killScheduled = false
     private var exited = false
     private var exitCode: Int32?
-    private var pipes: [Pipe] = []
+    /// Lines taken from a stream but not yet handed to `onLine`.
+    private var delivering = 0
+    private var result: RunResult?
+    private var waiters: [CheckedContinuation<RunResult, Never>] = []
+    private var exitWaiters: [CheckedContinuation<Int32?, Never>] = []
 
-    /// Bytes read so far, split into lines as they arrive.
+    /// Bytes read so far (kept only when collecting), split into lines as they arrive.
     private struct Stream {
         var data = Data()
         var lines = LineSplitter()
         var eof = false
     }
 
-    init(onLine: (@Sendable (String, OutputSource) -> Void)?) {
-        self.onLine = onLine
-    }
-
-    func start(
+    /// `keepsStderr: false` sends stderr to /dev/null, for a long-running
+    /// process whose log nobody reads.
+    init(
         _ executable: URL,
         _ arguments: [String],
-        _ options: RunOptions,
-        _ continuation: CheckedContinuation<RunResult, Error>
+        environment: [String: String],
+        input: String? = nil,
+        collectsOutput: Bool,
+        keepsStderr: Bool = true,
+        stopGrace: Duration
     ) {
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        let inPipe = options.input == nil ? nil : Pipe()
         process.executableURL = executable
         process.arguments = arguments
-        process.environment = options.environment
+        process.environment = environment
+        self.input = input
+        self.collectsOutput = collectsOutput
+        self.keepsStderr = keepsStderr
+        self.stopGrace = stopGrace
+    }
+
+    /// Launch it. `onLine` gets each complete output line, before
+    /// `finished()` returns. Throws only when the process cannot start.
+    func start(onLine: (@Sendable (String, OutputSource) -> Void)?) throws {
+        _ = ignoreSigpipe
+        let outPipe = Pipe()
+        let errPipe = keepsStderr ? Pipe() : nil
+        let inPipe = input == nil ? nil : Pipe()
         process.standardOutput = outPipe
-        process.standardError = errPipe
+        process.standardError = errPipe ?? FileHandle.nullDevice
         process.standardInput = inPipe ?? FileHandle.nullDevice
         process.terminationHandler = { [self] process in
-            didExit(process.terminationReason == .exit ? process.terminationStatus : nil, outPipe, errPipe)
+            didExit(process.terminationReason == .exit ? process.terminationStatus : nil)
         }
         outPipe.fileHandleForReading.readabilityHandler = { [self] handle in
             didRead(handle.availableData, .stdout, handle)
         }
-        errPipe.fileHandleForReading.readabilityHandler = { [self] handle in
+        errPipe?.fileHandleForReading.readabilityHandler = { [self] handle in
             didRead(handle.availableData, .stderr, handle)
         }
         lock.withLock {
-            self.continuation = continuation
-            pipes = [outPipe, errPipe]
+            self.onLine = onLine
+            pipes = [outPipe] + (errPipe.map { [$0] } ?? [])
+            if errPipe == nil { stderr.eof = true }
         }
         do {
             try process.run()
         } catch {
-            outPipe.fileHandleForReading.readabilityHandler = nil
-            errPipe.fileHandleForReading.readabilityHandler = nil
-            lock.withLock { self.continuation = nil }
-            continuation.resume(throwing: error)
-            return
+            for pipe in [outPipe] + (errPipe.map { [$0] } ?? []) { pipe.fileHandleForReading.readabilityHandler = nil }
+            lock.withLock { self.onLine = nil }
+            throw error
         }
-        let killNow = lock.withLock {
+        let stopNow = lock.withLock {
             started = true
-            return killRequested
+            return stopRequested
         }
-        if killNow { kill() }
-        if let inPipe, let input = options.input {
+        if stopNow { stop() }
+        if let inPipe, let input {
             DispatchQueue.global().async {
                 let writer = inPipe.fileHandleForWriting
                 try? writer.write(contentsOf: Data(input.utf8))
                 try? writer.close()
             }
         }
-        let seconds = Double(options.timeout.components.seconds)
-            + Double(options.timeout.components.attoseconds) / 1e18
-        DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { [self] in kill() }
     }
 
-    /// SIGTERM, once the process runs (a cancel can come before it starts).
-    /// If it already exited but a descendant still holds the pipes open,
-    /// stop waiting for EOF and finish with what was read.
-    func kill() {
-        let (running, exitedOpen) = lock.withLock {
-            if !started { killRequested = true }
-            return (started && !exited, started && exited)
+    /// Returns once the process exited and its output is read (or abandoned
+    /// after stop()). Any number of callers can wait.
+    func finished() async -> RunResult {
+        await withCheckedContinuation { continuation in
+            let done = lock.withLock { () -> RunResult? in
+                if let result { return result }
+                waiters.append(continuation)
+                return nil
+            }
+            if let done { continuation.resume(returning: done) }
         }
-        if running { process.terminate() }
-        if exitedOpen { abandonPipes() }
+    }
+
+    /// Returns once the process itself exited, with its exit code, even if
+    /// a descendant still holds its output open.
+    func exited() async -> Int32? {
+        await withCheckedContinuation { continuation in
+            let done = lock.withLock { () -> Int32?? in
+                if exited { return .some(exitCode) }
+                exitWaiters.append(continuation)
+                return .none
+            }
+            if let done { continuation.resume(returning: done) }
+        }
+    }
+
+    /// `finished()`, but a timeout or task cancellation stops it first.
+    func finished(timeout: Duration) async -> RunResult {
+        let timer = Task {
+            try await Task.sleep(for: timeout)
+            stop()
+        }
+        defer { timer.cancel() }
+        return await withTaskCancellationHandler {
+            await finished()
+        } onCancel: {
+            stop()
+        }
+    }
+
+    /// SIGTERM now, SIGKILL if it still runs after the grace. Once it exits,
+    /// output a descendant may still hold open is abandoned instead of
+    /// waited for. Before start(), the stop happens as soon as it starts.
+    /// Calling it again is harmless.
+    func stop() {
+        enum Action { case none, terminate(scheduleKill: Bool), abandonPipes }
+        let action = lock.withLock { () -> Action in
+            stopRequested = true
+            if !started { return .none }
+            if exited { return .abandonPipes }
+            defer { killScheduled = true }
+            return .terminate(scheduleKill: !killScheduled)
+        }
+        switch action {
+        case .none:
+            return
+        case .abandonPipes:
+            abandonPipes()
+        case .terminate(let scheduleKill):
+            process.terminate()
+            guard scheduleKill else { return }
+            let pid = process.processIdentifier
+            Task { [self] in
+                try? await Task.sleep(for: stopGrace)
+                // Checked under the lock: once reaped, the pid may be reused.
+                lock.withLock { if !exited && process.isRunning { kill(pid, SIGKILL) } }
+            }
+        }
     }
 
     private func abandonPipes() {
         let open = lock.withLock { pipes }
         for pipe in open { pipe.fileHandleForReading.readabilityHandler = nil }
-        let flushed = lock.withLock {
-            finishStream(.stdout).map { ($0, OutputSource.stdout) } + finishStream(.stderr).map { ($0, OutputSource.stderr) }
+        let lines = lock.withLock {
+            take(finishStream(.stdout).map { ($0, OutputSource.stdout) } + finishStream(.stderr).map { ($0, OutputSource.stderr) })
         }
-        for (line, source) in flushed { onLine?(line, source) }
-        finishIfDone()
+        deliver(lines)
     }
 
     private func didRead(_ data: Data, _ source: OutputSource, _ handle: FileHandle) {
         if data.isEmpty { handle.readabilityHandler = nil }
-        let lines = lock.withLock { () -> [String] in
-            if data.isEmpty { return finishStream(source) }
-            return appendToStream(source, data)
+        let lines = lock.withLock {
+            take((data.isEmpty ? finishStream(source) : appendToStream(source, data)).map { ($0, source) })
         }
-        for line in lines { onLine?(line, source) }
-        finishIfDone()
+        deliver(lines)
     }
 
-    private func didExit(_ code: Int32?, _ outPipe: Pipe, _ errPipe: Pipe) {
-        // Killed: a grandchild may still hold the pipes open, which would
-        // delay EOF until it exits, so stop reading now.
-        var flushed: [(String, OutputSource)] = []
-        if code == nil {
-            outPipe.fileHandleForReading.readabilityHandler = nil
-            errPipe.fileHandleForReading.readabilityHandler = nil
-        }
-        lock.withLock {
+    /// A stopped process's output is abandoned once it exits; otherwise its
+    /// output is read to the end, so nothing it printed before dying is lost.
+    private func didExit(_ code: Int32?) {
+        let (abandon, waiting) = lock.withLock {
             exited = true
             exitCode = code
-            if code == nil {
-                flushed += finishStream(.stdout).map { ($0, .stdout) }
-                flushed += finishStream(.stderr).map { ($0, .stderr) }
-            }
+            defer { exitWaiters = [] }
+            return (stopRequested, exitWaiters)
         }
-        for (line, source) in flushed { onLine?(line, source) }
+        for continuation in waiting { continuation.resume(returning: code) }
+        if abandon { abandonPipes() } else { finishIfDone() }
+    }
+
+    /// Counts lines taken from a stream until they are delivered, so
+    /// `finished()` cannot return before `onLine` saw them. Lock held.
+    private func take(_ lines: [(String, OutputSource)]) -> [(String, OutputSource)] {
+        delivering += 1
+        return lines
+    }
+
+    private func deliver(_ lines: [(String, OutputSource)]) {
+        let handler = lock.withLock { onLine }
+        for (line, source) in lines { handler?(line, source) }
+        lock.withLock { delivering -= 1 }
         finishIfDone()
     }
 
     private func appendToStream(_ source: OutputSource, _ data: Data) -> [String] {
         var stream = source == .stdout ? stdout : stderr
         guard !stream.eof else { return [] }
-        stream.data.append(data)
+        if collectsOutput { stream.data.append(data) }
         let lines = stream.lines.add(data)
         if source == .stdout { stdout = stream } else { stderr = stream }
         return lines
@@ -201,16 +281,21 @@ private final class RunState: @unchecked Sendable {
     }
 
     private func finishIfDone() {
-        let done = lock.withLock { () -> (CheckedContinuation<RunResult, Error>, RunResult)? in
-            guard exited, stdout.eof, stderr.eof, let continuation else { return nil }
-            self.continuation = nil
-            return (continuation, RunResult(
+        let done = lock.withLock { () -> (RunResult, [CheckedContinuation<RunResult, Never>])? in
+            guard exited, stdout.eof, stderr.eof, delivering == 0, result == nil else { return nil }
+            let ended = RunResult(
                 exitCode: exitCode,
                 stdout: stripAnsi(String(decoding: stdout.data, as: UTF8.self)),
                 stderr: stripAnsi(String(decoding: stderr.data, as: UTF8.self))
-            ))
+            )
+            result = ended
+            onLine = nil
+            defer { waiters = [] }
+            return (ended, waiters)
         }
-        if let (continuation, result) = done { continuation.resume(returning: result) }
+        if let (ended, waiting) = done {
+            for continuation in waiting { continuation.resume(returning: ended) }
+        }
     }
 }
 
