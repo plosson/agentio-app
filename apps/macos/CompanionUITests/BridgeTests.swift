@@ -7,8 +7,9 @@ struct BridgeCallTests {
     @Test func acceptsTheFiveCalls() {
         #expect(BridgeCall(message: ["method": "addProfile", "args": ["gmail"]]) == .addProfile(service: "gmail", displayName: nil))
         #expect(BridgeCall(message: ["method": "addProfile", "args": ["gmail", "Gmail"]]) == .addProfile(service: "gmail", displayName: "Gmail"))
-        #expect(BridgeCall(message: ["method": "reauth", "args": ["gmail"]]) == .reauth(service: "gmail", name: nil))
-        #expect(BridgeCall(message: ["method": "reauth", "args": ["gmail", "work"]]) == .reauth(service: "gmail", name: "work"))
+        #expect(BridgeCall(message: ["method": "reauth", "args": ["gmail"]]) == .reauth(service: "gmail", name: nil, displayName: nil))
+        #expect(BridgeCall(message: ["method": "reauth", "args": ["gmail", "work"]]) == .reauth(service: "gmail", name: "work", displayName: nil))
+        #expect(BridgeCall(message: ["method": "reauth", "args": ["gmail", "work", "Gmail"]]) == .reauth(service: "gmail", name: "work", displayName: "Gmail"))
         #expect(BridgeCall(message: ["method": "openTerminal", "args": [Any]()]) == .openTerminal)
         #expect(BridgeCall(message: ["method": "dragWindow", "args": [Any]()]) == .dragWindow)
         #expect(BridgeCall(message: ["method": "signInAgain", "args": [Any]()]) == .signInAgain)
@@ -19,7 +20,9 @@ struct BridgeCallTests {
             "addProfile", ["method": "addProfile"], ["method": "addProfile", "args": "gmail"],
             ["method": "addProfile", "args": [Any]()], ["method": "addProfile", "args": [42]],
             ["method": "addProfile", "args": [""]], ["method": "addProfile", "args": ["a", "b", "c"]],
-            ["method": "reauth", "args": ["gmail", NSNull()]], ["method": "openTerminal", "args": ["x"]],
+            ["method": "reauth", "args": ["gmail", NSNull()]],
+            ["method": "reauth", "args": ["gmail", "work", "Gmail", "x"]], ["method": "reauth", "args": ["gmail", "work", ""]],
+            ["method": "reauth", "args": ["gmail", "work", 42]], ["method": "openTerminal", "args": ["x"]],
             ["method": "dragWindow", "args": ["x"]], ["method": "dragWindow"], ["method": "DragWindow", "args": [Any]()],
             ["method": "signInAgain", "args": ["https://evil.example"]], ["method": "signInAgain"],
             ["method": "exec", "args": ["rm -rf /"]], ["method": "__proto__", "args": [Any]()],
@@ -27,6 +30,20 @@ struct BridgeCallTests {
         for body in bad {
             #expect(BridgeCall(message: body) == nil, "body: \(body)")
         }
+    }
+}
+
+@MainActor
+struct BridgeActionTests {
+    @Test func reauthReachesOnlyTheReauthAction() {
+        var reauths: [String] = []
+        var others = 0
+        for call in [BridgeCall.reauth(service: "gmail", name: "work", displayName: "Gmail"), .reauth(service: "gmail", name: nil, displayName: nil)] {
+            performBridgeCall(call, in: nil, signInAgain: { others += 1 }, addProfile: { _, _ in others += 1 },
+                              reauth: { reauths.append("\($0)|\($1 ?? "nil")|\($2 ?? "nil")") })
+        }
+        #expect(reauths == ["gmail|work|Gmail", "gmail|nil|nil"])
+        #expect(others == 0)
     }
 }
 
@@ -60,9 +77,9 @@ struct BridgeScriptTests {
         let present = try await webView.callAsyncJavaScript("return window.agentioCompanion.present === true", contentWorld: .page)
         #expect(present as? Bool == true)
         _ = try await webView.callAsyncJavaScript(
-            "await window.agentioCompanion.addProfile('gmail', 'Gmail'); await window.agentioCompanion.reauth('gmail', null); await window.agentioCompanion.openTerminal(); await window.agentioCompanion.dragWindow(); await window.agentioCompanion.signInAgain(); return 1",
+            "await window.agentioCompanion.addProfile('gmail', 'Gmail'); await window.agentioCompanion.reauth('gmail', null); await window.agentioCompanion.reauth('gmail', 'a b', 'Gmail'); await window.agentioCompanion.openTerminal(); await window.agentioCompanion.dragWindow(); await window.agentioCompanion.signInAgain(); return 1",
             contentWorld: .page)
-        #expect(log.calls == [.addProfile(service: "gmail", displayName: "Gmail"), .reauth(service: "gmail", name: nil), .openTerminal, .dragWindow, .signInAgain])
+        #expect(log.calls == [.addProfile(service: "gmail", displayName: "Gmail"), .reauth(service: "gmail", name: nil, displayName: nil), .reauth(service: "gmail", name: "a b", displayName: "Gmail"), .openTerminal, .dragWindow, .signInAgain])
     }
 
     @Test func theProfilesChangedEventCarriesTheProfileUnharmed() async throws {

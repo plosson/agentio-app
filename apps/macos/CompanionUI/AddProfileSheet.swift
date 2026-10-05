@@ -2,14 +2,14 @@ import AgentioKit
 import AppKit
 import SwiftUI
 
-/// Adding one profile, over the hub page.
+/// Adding one profile, or signing one in again, over the hub page.
 struct AddProfileSheet: View {
     @Bindable var flow: AddProfileFlow
     let close: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Add \(flow.displayName)").font(Theme.title)
+            Text(title).font(Theme.title)
             content
         }
         .font(Theme.body)
@@ -17,8 +17,18 @@ struct AddProfileSheet: View {
         .frame(width: 420, alignment: .leading)
     }
 
+    private var title: String {
+        flow.purpose == .add ? "Add \(flow.displayName)" : "Sign in again to \(flow.displayName)"
+    }
+
     @ViewBuilder private var content: some View {
         switch flow.step {
+        case .confirm:
+            if case .reauth(let profile) = flow.purpose {
+                Text(profile).font(Theme.mono).textSelection(.enabled)
+            }
+            Explanation("Your browser opens to sign in again.")
+            buttons(primary: ("Continue", flow.submit))
         case .loading:
             ProgressView().frame(maxWidth: .infinity)
             buttons(primary: nil)
@@ -34,7 +44,7 @@ struct AddProfileSheet: View {
         case .working(let auth):
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text(auth == .none ? "Checking…" : "Waiting for you in the browser…").foregroundStyle(Theme.textSecondary)
+                Text(auth == .none && flow.purpose == .add ? "Checking…" : "Waiting for you in the browser…").foregroundStyle(Theme.textSecondary)
             }
             if flow.lastOpened != nil { Button("Open the page again", action: flow.reopen).buttonStyle(LinkButtonStyle()) }
             buttons(primary: nil)
@@ -47,10 +57,14 @@ struct AddProfileSheet: View {
             field(input, text: $flow.answer)
             buttons(primary: ("Continue", flow.sendAnswer))
         case .added(let profile):
-            Label("\(flow.displayName) added as \(profile)", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.text)
+            Label(flow.purpose == .add ? "\(flow.displayName) added as \(profile)" : "Signed in again as \(profile)",
+                  systemImage: "checkmark.circle.fill").foregroundStyle(Theme.text)
             buttons(primary: ("Done", close), cancel: nil)
         case .failed(let text):
             Text(text).foregroundStyle(Theme.danger).textSelection(.enabled)
+            if let suggestion = flow.failureSuggestion {
+                Text(suggestion).font(Theme.caption).foregroundStyle(Theme.textSecondary).textSelection(.enabled)
+            }
             buttons(primary: nil, cancel: "Close")
         }
     }

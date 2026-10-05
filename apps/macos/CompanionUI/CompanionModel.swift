@@ -21,7 +21,7 @@ public enum Screen: Equatable, Sendable {
     case vault
 }
 
-/// A profile the hub page should learn about: it was just added.
+/// A profile the hub page should learn about: it was just added, or signed in again.
 public struct PageNotice: Equatable, Sendable {
     public let id: UUID
     public let service: String
@@ -51,7 +51,7 @@ public final class CompanionModel {
     /// in again when it is false.
     public private(set) var canManageProfiles: Bool?
 
-    /// The add-profile sheet; nil when none is open.
+    /// The add-profile (or sign-in-again) sheet; nil when none is open.
     public private(set) var addFlow: AddProfileFlow?
     /// The last profile added, for the page to pick up.
     public private(set) var pageNotice: PageNotice?
@@ -345,8 +345,19 @@ public final class CompanionModel {
     /// The hub page asked to add `service`. Only on an open remote vault whose key may manage profiles,
     /// and one at a time.
     public func addProfile(service: String, displayName: String?) {
+        openFlow(service: service, displayName: displayName ?? service, purpose: .add)
+    }
+
+    /// The hub page asked to sign `profile` of `service` in again. Same conditions as `addProfile`,
+    /// and the name must be one.
+    public func reauthProfile(service: String, profile: String, displayName: String? = nil) {
+        guard isProfileName(profile) else { return }
+        openFlow(service: service, displayName: displayName ?? service, purpose: .reauth(profile: profile))
+    }
+
+    private func openFlow(service: String, displayName: String, purpose: AddProfileFlow.Purpose) {
         guard screen == .vault, hubURL != daemon?.url.absoluteString, canManageProfiles == true, addFlow == nil else { return }
-        let flow = AddProfileFlow(service: service, displayName: displayName ?? service, backend: backend,
+        let flow = AddProfileFlow(service: service, displayName: displayName, purpose: purpose, backend: backend,
                                   openURL: openURL) { [weak self] service, profile in
             self?.pageNotice = PageNotice(id: UUID(), service: service, profile: profile)
         }

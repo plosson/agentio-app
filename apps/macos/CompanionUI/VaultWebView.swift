@@ -12,6 +12,7 @@ struct VaultWebView: NSViewRepresentable {
     let notice: PageNotice?
     let onSignInAgain: @MainActor () -> Void
     let onAddProfile: @MainActor (String, String?) -> Void
+    let onReauth: @MainActor (String, String?, String?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -20,9 +21,11 @@ struct VaultWebView: NSViewRepresentable {
         let coordinator = context.coordinator
         let signInAgain = onSignInAgain
         let addProfile = onAddProfile
+        let reauth = onReauth
         installBridge(in: configuration.userContentController, canManageProfiles: canManageProfiles,
                       handler: BridgeHandler(hubURL: url) { [weak coordinator] call in
-            performBridgeCall(call, in: coordinator?.webView, signInAgain: signInAgain, addProfile: addProfile)
+            performBridgeCall(call, in: coordinator?.webView, signInAgain: signInAgain, addProfile: addProfile,
+                              reauth: reauth)
         })
         let webView = HubWebView(frame: .zero, configuration: configuration)
         webView.uiDelegate = coordinator

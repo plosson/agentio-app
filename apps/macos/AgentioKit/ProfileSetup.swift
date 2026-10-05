@@ -38,12 +38,13 @@ public struct SetupNeeds: Sendable, Equatable {
     public init(inputs: [SetupInput], auth: SetupAuth) { self.inputs = inputs; self.auth = auth }
 }
 
-/// A step of a running `profile add --json`.
+/// A step of a running `profile add --json` or `profile reauth --json`.
 public enum SetupEvent: Sendable, Equatable {
     case code(userCode: String, url: URL)
     case open(URL)
     case ask(SetupInput)
     case added(profile: String)
+    case reauthed(profile: String)
 }
 
 let unreadableSetup = AgentioError("This agentio asks for something the app cannot show. Update AgentIO Companion.")
@@ -102,9 +103,9 @@ func setupEvent(_ event: CliEvent) throws -> SetupEvent? {
     case "ask":
         guard let input = SetupInput(fields: event.fields) else { throw unreadableSetup }
         return .ask(input)
-    case "added":
+    case "added", "reauthed":
         guard let profile = event.string("profile"), !profile.isEmpty else { throw unreadableSetup }
-        return .added(profile: profile)
+        return event.name == "added" ? .added(profile: profile) : .reauthed(profile: profile)
     default:
         return nil
     }
@@ -117,27 +118,41 @@ func isServiceID(_ text: String) -> Bool {
 
 func invalidService(_ text: String) -> AgentioError { AgentioError("Not a service: \(text)") }
 
+/// A profile name that can reach a command line as one argument: not empty, at most 200
+/// characters, on one line, and not read as an option.
+public func isProfileName(_ text: String) -> Bool {
+    !text.isEmpty && text.count <= 200 && !text.contains(where: \.isNewline) && !text.hasPrefix("-")
+}
+
 /// One JSON object on one line, for agentio's stdin.
 func jsonLine(_ object: [String: String]) -> String {
     let data = (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data("{}".utf8)
     return String(decoding: data, as: UTF8.self) + "\n"
 }
 
-/// A running `profile add --json`.
+/// A running `profile add --json` or `profile reauth --json`.
 public protocol ProfileAddRunning: AnyObject, Sendable {
     /// Answer the question the run asked (`.ask`).
     func answer(id: String, value: String)
     /// Stop the run; `finished()` then throws "cancelled".
     func cancel()
-    /// The new profile's name once added; the failure otherwise.
+    /// The profile's name once added (or signed in again); the failure otherwise.
     func finished() async throws -> String
 }
 
 final class ProfileAddRun: ProfileAddRunning, @unchecked Sendable {
+    /// The event that ends the run well, and what the run is called in its errors.
+    private let endEvent: String
+    private let action: String
     private let lock = NSLock()
     private var process: AgentioProcess?
     private var cancelled = false
     private var unreadable = false
+
+    init(endEvent: String = "added", action: String = "Adding the profile") {
+        self.endEvent = endEvent
+        self.action = action
+    }
 
     /// Events can arrive before this; an unreadable one then stops the process here.
     func attach(_ process: AgentioProcess) {
@@ -164,16 +179,16 @@ final class ProfileAddRun: ProfileAddRunning, @unchecked Sendable {
     }
 
     func finished() async throws -> String {
-        guard let process = lock.withLock({ self.process }) else { throw AgentioError("Adding the profile did not start") }
+        guard let process = lock.withLock({ self.process }) else { throw AgentioError("\(action) did not start") }
         // OAuth waits up to 5 minutes and device codes up to 10; this only guards a hang.
         let exit = await process.finished(timeout: .seconds(20 * 60))
         if let formatError = process.formatError { throw formatError }
         let (cancelled, unreadable) = lock.withLock { (self.cancelled, self.unreadable) }
-        if cancelled { throw AgentioError("Adding the profile was cancelled", exitCode: exit.exitCode) }
+        if cancelled { throw AgentioError("\(action) was cancelled", exitCode: exit.exitCode) }
         if unreadable { throw unreadableSetup }
         let result = AgentioResult(exitCode: exit.exitCode, stdout: exit.stdout, stderr: exit.stderr, events: process.events)
-        guard exit.exitCode == 0, let profile = process.events.last(where: { $0.name == "added" })?.string("profile") else {
-            throw failure(result, fallback: "Adding the profile failed")
+        guard exit.exitCode == 0, let profile = process.events.last(where: { $0.name == endEvent })?.string("profile") else {
+            throw failure(result, fallback: "\(action) failed")
         }
         return profile
     }
@@ -200,7 +215,22 @@ extension AgentioCLI {
         guard isServiceID(service) else { throw invalidService(service) }
         let run = ProfileAddRun()
         let arguments = [service, "profile", "add", "--json", "--input", "-"] + (readOnly ? ["--read-only"] : [])
-        let process = try start(arguments, input: jsonLine(values), keepsInputOpen: true) { event in
+        return try startSetupRun(run, arguments, input: jsonLine(values), onEvent: onEvent)
+    }
+
+    /// `profile reauth <service> <profile> --json`: stdin kept open for answers only; each step to `onEvent`.
+    public func startProfileReauth(_ service: String, profile: String,
+                                   onEvent: @escaping @Sendable (SetupEvent) -> Void) throws -> any ProfileAddRunning {
+        guard isServiceID(service) else { throw invalidService(service) }
+        guard isProfileName(profile) else { throw AgentioError("Not a profile name: \(profile)") }
+        let run = ProfileAddRun(endEvent: "reauthed", action: "Signing in again")
+        return try startSetupRun(run, ["profile", "reauth", service, profile, "--json"], input: nil, onEvent: onEvent)
+    }
+
+    /// Start a run whose steps go to `onEvent`; an event the app cannot read stops it.
+    private func startSetupRun(_ run: ProfileAddRun, _ arguments: [String], input: String?,
+                               onEvent: @escaping @Sendable (SetupEvent) -> Void) throws -> ProfileAddRun {
+        let process = try start(arguments, input: input, keepsInputOpen: true) { event in
             do {
                 if let step = try setupEvent(event) { onEvent(step) }
             } catch {

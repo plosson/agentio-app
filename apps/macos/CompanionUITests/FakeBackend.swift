@@ -31,6 +31,7 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     private var _describeGated = false
     private var _startedAdds: [String] = []
     private var _addRuns: [FakeAddRun] = []
+    private var _startedReauths: [String] = []
 
     private func locked<T>(_ body: () -> T) -> T { lock.withLock(body) }
 
@@ -55,7 +56,10 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     var describeResult: Result<SetupNeeds?, AgentioError> { get { locked { _describe } } set { locked { _describe = newValue } } }
     /// Each started add: "service|k=v,k=v|readOnly".
     var startedAdds: [String] { locked { _startedAdds } }
+    /// Every started run, add or sign-in-again, in order.
     var addRuns: [FakeAddRun] { locked { _addRuns } }
+    /// Each started sign-in-again: "service|profile".
+    var startedReauths: [String] { locked { _startedReauths } }
 
     /// While true, `describeSetup` waits (and stops when its task is cancelled).
     var describeGated: Bool { get { locked { _describeGated } } set { locked { _describeGated = newValue } } }
@@ -70,6 +74,15 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
         let run = FakeAddRun(onEvent: onEvent)
         locked {
             _startedAdds.append("\(service)|\(sortedValues)|\(readOnly)")
+            _addRuns.append(run)
+        }
+        return run
+    }
+
+    func startProfileReauth(_ service: String, profile: String, onEvent: @escaping @Sendable (SetupEvent) -> Void) throws -> any ProfileAddRunning {
+        let run = FakeAddRun(onEvent: onEvent)
+        locked {
+            _startedReauths.append("\(service)|\(profile)")
             _addRuns.append(run)
         }
         return run

@@ -2,10 +2,17 @@ import AgentioKit
 import Foundation
 import Observation
 
-/// Adding one profile from the hub page: what the sheet shows, step by step.
+/// Adding one profile from the hub page, or signing one in again: what the sheet shows, step by step.
 @MainActor @Observable
 public final class AddProfileFlow: Identifiable {
+    public enum Purpose: Equatable, Sendable {
+        case add
+        case reauth(profile: String)
+    }
+
     public enum Step: Equatable {
+        /// Signing in again: the profile, before anything runs.
+        case confirm
         case loading
         case unsupported
         case form(SetupNeeds)
@@ -19,11 +26,14 @@ public final class AddProfileFlow: Identifiable {
     public let id = UUID()
     public let service: String
     public let displayName: String
-    public private(set) var step: Step = .loading
+    public let purpose: Purpose
+    public private(set) var step: Step
     public var values: [String: String] = [:]
     public var readOnly = false
     public var answer = ""
     public private(set) var lastOpened: URL?
+    /// agentio's own suggestion for the failure, when it gave one.
+    public private(set) var failureSuggestion: String?
 
     private let backend: any CompanionBackend
     private let openURL: @MainActor (URL) -> Void
@@ -32,10 +42,12 @@ public final class AddProfileFlow: Identifiable {
     private var auth: SetupAuth = .none
     private var cancelled = false
 
-    init(service: String, displayName: String, backend: any CompanionBackend,
+    init(service: String, displayName: String, purpose: Purpose = .add, backend: any CompanionBackend,
          openURL: @escaping @MainActor (URL) -> Void, onAdded: @escaping @MainActor (String, String) -> Void) {
         self.service = service
         self.displayName = displayName
+        self.purpose = purpose
+        self.step = purpose == .add ? .loading : .confirm
         self.backend = backend
         self.openURL = openURL
         self.onAdded = onAdded
@@ -43,6 +55,8 @@ public final class AddProfileFlow: Identifiable {
 
     public var canSubmit: Bool {
         switch step {
+        case .confirm:
+            return !cancelled
         case .form(let needs):
             return needs.inputs.allSatisfy { !$0.required || !(values[$0.id] ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
         case .asking(let input):
@@ -52,29 +66,45 @@ public final class AddProfileFlow: Identifiable {
         }
     }
 
+    /// Describe the setup; signing in again has nothing to describe.
     public func start() async {
+        guard purpose == .add else { return }
         do {
             guard let needs = try await backend.describeSetup(service) else { step = .unsupported; return }
             for input in needs.inputs { if let value = input.defaultValue { values[input.id] = value } }
             step = .form(needs)
         } catch {
-            step = .failed(message(error))
+            fail(error)
         }
     }
 
+    /// Continue: start the add with the form's values, or the sign-in again.
     public func submit() {
-        guard case .form(let needs) = step, canSubmit else { return }
-        auth = needs.auth
-        let given = values.filter { !$0.value.trimmingCharacters(in: .whitespaces).isEmpty }
-        step = .working(needs.auth)
+        guard canSubmit else { return }
+        let onEvent: @Sendable (SetupEvent) -> Void = { [weak self] event in
+            Task { @MainActor in self?.receive(event) }
+        }
+        switch (step, purpose) {
+        case (.form(let needs), .add):
+            let given = values.filter { !$0.value.trimmingCharacters(in: .whitespaces).isEmpty }
+            let readOnly = readOnly
+            begin(needs.auth) { try backend.startProfileAdd(service, values: given, readOnly: readOnly, onEvent: onEvent) }
+        case (.confirm, .reauth(let profile)):
+            begin(.none) { try backend.startProfileReauth(service, profile: profile, onEvent: onEvent) }
+        default:
+            return
+        }
+    }
+
+    private func begin(_ auth: SetupAuth, _ starting: () throws -> any ProfileAddRunning) {
+        self.auth = auth
+        step = .working(auth)
         do {
-            let run = try backend.startProfileAdd(service, values: given, readOnly: readOnly) { [weak self] event in
-                Task { @MainActor in self?.receive(event) }
-            }
+            let run = try starting()
             self.run = run
             Task { await finish(run) }
         } catch {
-            step = .failed(message(error))
+            fail(error)
         }
     }
 
@@ -104,7 +134,7 @@ public final class AddProfileFlow: Identifiable {
         case .ask(let input):
             answer = input.defaultValue ?? ""
             step = .asking(input)
-        case .added:
+        case .added, .reauthed:
             break
         }
     }
@@ -117,8 +147,13 @@ public final class AddProfileFlow: Identifiable {
             onAdded(service, profile)
         } catch {
             guard !cancelled else { return }
-            step = .failed(message(error))
+            fail(error)
         }
+    }
+
+    private func fail(_ error: Error) {
+        failureSuggestion = (error as? AgentioError)?.suggestion
+        step = .failed(message(error))
     }
 
     private func message(_ error: Error) -> String {
