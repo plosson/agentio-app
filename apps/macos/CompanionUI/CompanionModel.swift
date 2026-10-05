@@ -28,6 +28,18 @@ public struct PageNotice: Equatable, Sendable {
     public let profile: String
 }
 
+/// What the hub-address field says about the address typed so far.
+public enum HubCheck: Equatable, Sendable {
+    case idle
+    case checking(hub: String)
+    case found(hub: String, version: String)
+    /// Not an address the app accepts (normalizeHubBase refused it).
+    case invalid
+    case unreachable(hub: String)
+    /// A hub older than minimumHubVersion: signing in from the app would fail.
+    case tooOld(hub: String, version: String)
+}
+
 /// The onboarding's state and steps. Views read it and call its steps.
 @MainActor @Observable
 public final class CompanionModel {
@@ -48,6 +60,8 @@ public final class CompanionModel {
     public private(set) var download = DownloadState()
     /// Shown instead of the actions while a long step runs.
     public private(set) var busy: String?
+    /// What the hub-address field says about the address typed so far.
+    public private(set) var hubCheck: HubCheck = .idle
     public var error: String?
     /// The hub's base URL: remembered, entered, or reported by the CLI.
     public private(set) var hubURL = ""
@@ -77,6 +91,8 @@ public final class CompanionModel {
     private var downloadTask: Task<Result<CliInfo, Error>, Never>?
     /// The running download; a download that is no longer current changes nothing.
     private var downloadID: UUID?
+    /// The latest hub check; an older one still running changes nothing when it ends.
+    private var hubCheckID: UUID?
     /// The screen a failed download goes back to on "Try again".
     private var downloadFrom: Screen?
     /// Loading the add sheet; stopped with the sheet.
@@ -235,6 +251,8 @@ public final class CompanionModel {
 
     public func goRemote() {
         error = nil
+        hubCheckID = nil
+        hubCheck = .idle
         screen = .hubURL
     }
 
@@ -245,6 +263,31 @@ public final class CompanionModel {
     }
 
     // MARK: Remote vault (S4, login, approving)
+
+    /// Check `raw` as the user types; a newer call wins over an older one still running.
+    public func checkHub(_ raw: String) async {
+        let id = UUID()
+        hubCheckID = id
+        guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return hubCheck = .idle }
+        let hub: String
+        do {
+            hub = try normalizeHubBase(raw, allowLocalHTTP: allowLocalHTTP)
+        } catch {
+            return hubCheck = .invalid
+        }
+        hubCheck = .checking(hub: hub)
+        let result: HubCheck
+        do {
+            let version = try await backend.hubVersion(hub)
+            result = version < minimumHubVersion
+                ? .tooOld(hub: hub, version: version.description)
+                : .found(hub: hub, version: version.description)
+        } catch {
+            result = .unreachable(hub: hub)
+        }
+        guard hubCheckID == id else { return }
+        hubCheck = result
+    }
 
     /// Check the hub's version, bring the CLI up to it, then `agentio login`,
     /// approved by the hub owner on the hub's page.

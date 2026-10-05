@@ -574,6 +574,86 @@ struct CompanionModelTests {
         #expect(model.error == "Cannot reach the vault hub at https://h.example: offline")
     }
 
+    // MARK: Hub check
+
+    @Test func blankIsIdleAndNoNetwork() async {
+        await model.checkHub("   ")
+        #expect(model.hubCheck == .idle)
+        #expect(backend.hubChecks.isEmpty)
+    }
+
+    @Test(arguments: ["ftp://h.example", "https://", "http://h.example"])
+    func anAddressTheAppRefusesIsInvalidAndNeverFetched(raw: String) async {
+        await model.checkHub(raw)
+        #expect(model.hubCheck == .invalid)
+        #expect(backend.hubChecks.isEmpty)
+    }
+
+    @Test func aHubIsFoundByItsNormalisedAddress() async {
+        backend.hubVersionResult = .success(CliVersion("3.17.0")!)
+        await model.checkHub("H.example/ui/")
+        #expect(model.hubCheck == .found(hub: "https://h.example", version: "3.17.0"))
+    }
+
+    @Test func anOldHubIsTooOld() async {
+        backend.hubVersionResult = .success(CliVersion("3.13.9")!)
+        await model.checkHub("h.example")
+        #expect(model.hubCheck == .tooOld(hub: "https://h.example", version: "3.13.9"))
+    }
+
+    @Test func noAnswerIsUnreachable() async {
+        backend.hubVersionResult = .failure(AgentioError("offline"))
+        await model.checkHub("h.example")
+        #expect(model.hubCheck == .unreachable(hub: "https://h.example"))
+    }
+
+    @Test func theLastAddressTypedWinsEvenWhenAnOlderAnswerArrivesLast() async {
+        backend.hubVersionGates = ["https://a.example"]
+        let a = Task { await model.checkHub("a.example") }
+        await eventually { model.hubCheck == .checking(hub: "https://a.example") }
+        await model.checkHub("b.example")
+        #expect(model.hubCheck == .found(hub: "https://b.example", version: "3.14.0"))
+        backend.openHubVersionGate("https://a.example")
+        await a.value
+        #expect(model.hubCheck == .found(hub: "https://b.example", version: "3.14.0"))
+    }
+
+    @Test func clearingTheFieldWhileACheckRunsLeavesItIdle() async {
+        backend.hubVersionGates = ["https://a.example"]
+        let a = Task { await model.checkHub("a.example") }
+        await eventually { model.hubCheck == .checking(hub: "https://a.example") }
+        await model.checkHub("")
+        backend.openHubVersionGate("https://a.example")
+        await a.value
+        #expect(model.hubCheck == .idle)
+    }
+
+    @Test func anInvalidAddressWhileACheckRunsIsNotOverwrittenByTheOldAnswer() async {
+        backend.hubVersionGates = ["https://a.example"]
+        let a = Task { await model.checkHub("a.example") }
+        await eventually { model.hubCheck == .checking(hub: "https://a.example") }
+        await model.checkHub("ftp://a.example")
+        backend.openHubVersionGate("https://a.example")
+        await a.value
+        #expect(model.hubCheck == .invalid)
+    }
+
+    @Test func goingToTheHubScreenForgetsAnOldCheck() async {
+        await model.checkHub("h.example")
+        model.goRemote()
+        #expect(model.hubCheck == .idle)
+    }
+
+    @Test func aCheckStillRunningWhenTheHubScreenOpensChangesNothing() async {
+        backend.hubVersionGates = ["https://a.example"]
+        let a = Task { await model.checkHub("a.example") }
+        await eventually { model.hubCheck == .checking(hub: "https://a.example") }
+        model.goRemote()
+        backend.openHubVersionGate("https://a.example")
+        await a.value
+        #expect(model.hubCheck == .idle)
+    }
+
     // MARK: Local vault
 
     @Test(arguments: [("1234567", "1234567", "The passphrase needs at least 8 characters"),

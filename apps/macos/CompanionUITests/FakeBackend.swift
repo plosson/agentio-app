@@ -17,6 +17,7 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     private var _installGate = false
     private var _hubVersion: Result<CliVersion, AgentioError> = .success(CliVersion("3.14.0")!)
     private var _hubChecks: [String] = []
+    private var _hubVersionGates: Set<String> = []
     private var _vaultState: Result<VaultState, AgentioError> = .success(.none)
     private var _vaultStateCalls = 0
     private var _loginCode: LoginCode?
@@ -47,6 +48,10 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     var installs: [CliVersion] { locked { _installs } }
     var hubVersionResult: Result<CliVersion, AgentioError> { get { locked { _hubVersion } } set { locked { _hubVersion = newValue } } }
     var hubChecks: [String] { locked { _hubChecks } }
+    /// While a hub is in this set, `hubVersion` for it waits (and stops when its task is cancelled).
+    var hubVersionGates: Set<String> { get { locked { _hubVersionGates } } set { locked { _hubVersionGates = newValue } } }
+    /// Let the held version checks for `hub` answer.
+    func openHubVersionGate(_ hub: String) { locked { _ = _hubVersionGates.remove(hub) } }
     var vaultStateResult: Result<VaultState, AgentioError> { get { locked { _vaultState } } set { locked { _vaultState = newValue } } }
     var vaultStateCalls: Int { locked { _vaultStateCalls } }
     var loginCode: LoginCode? { get { locked { _loginCode } } set { locked { _loginCode = newValue } } }
@@ -107,6 +112,7 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
 
     func hubVersion(_ hub: String) async throws -> CliVersion {
         locked { _hubChecks.append(hub) }
+        while hubVersionGates.contains(hub) { try await Task.sleep(for: .milliseconds(10)) }
         return try hubVersionResult.get()
     }
 
