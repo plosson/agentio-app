@@ -11,7 +11,7 @@ struct VaultWebView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        installBridge(in: configuration.userContentController, handler: BridgeHandler(onCall: performBridgeCall))
+        installBridge(in: configuration.userContentController, handler: BridgeHandler(hubURL: url, onCall: performBridgeCall))
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.uiDelegate = context.coordinator
         context.coordinator.loaded = url

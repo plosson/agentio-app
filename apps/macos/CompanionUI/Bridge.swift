@@ -46,12 +46,39 @@ let bridgeScript = """
 })();
 """
 
-/// Receives the bridge's messages; replies with an error for malformed calls
-/// and for calls from frames other than the main one.
+/// Scheme, host and port of an origin, with the default port filled in.
+private struct Origin: Equatable {
+    let scheme: String
+    let host: String
+    let port: Int
+
+    init?(url: URL) {
+        guard let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased() else { return nil }
+        self.init(scheme: scheme, host: host, port: url.port ?? 0)
+    }
+
+    init(securityOrigin: WKSecurityOrigin) {
+        self.init(scheme: securityOrigin.protocol.lowercased(), host: securityOrigin.host.lowercased(),
+                  port: securityOrigin.port)
+    }
+
+    private init(scheme: String, host: String, port: Int) {
+        self.scheme = scheme
+        self.host = host
+        self.port = port != 0 ? port : (scheme == "https" ? 443 : scheme == "http" ? 80 : 0)
+    }
+}
+
+/// Receives the bridge's messages; replies with an error for malformed calls,
+/// for calls from frames other than the main one, and for calls from pages
+/// that are not from the hub's origin.
 final class BridgeHandler: NSObject, WKScriptMessageHandlerWithReply {
+    private let allowedOrigin: Origin?
     private let onCall: @MainActor (BridgeCall) -> Void
 
-    init(onCall: @escaping @MainActor (BridgeCall) -> Void) {
+    /// `hubURL` is the hub page; only pages from its origin may call.
+    init(hubURL: URL, onCall: @escaping @MainActor (BridgeCall) -> Void) {
+        self.allowedOrigin = Origin(url: hubURL)
         self.onCall = onCall
     }
 
@@ -60,7 +87,9 @@ final class BridgeHandler: NSObject, WKScriptMessageHandlerWithReply {
         didReceive message: WKScriptMessage,
         replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void
     ) {
-        guard message.frameInfo.isMainFrame, let call = BridgeCall(message: message.body) else {
+        guard message.frameInfo.isMainFrame,
+              let allowedOrigin, Origin(securityOrigin: message.frameInfo.securityOrigin) == allowedOrigin,
+              let call = BridgeCall(message: message.body) else {
             return replyHandler(nil, "Invalid agentioCompanion call")
         }
         onCall(call)
