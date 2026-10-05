@@ -109,7 +109,7 @@ No confetti, no full-screen green wash, no haptic assumptions.
 |------------|------|
 | Wizard step forward | Cross-fade 200–320ms; optional 4px upward drift on entering content |
 | Back | Same, reverse drift |
-| To vault mode | Fade wizard out 200ms; vault bar + BrowserView fade in |
+| To vault mode | Fade wizard out 200ms; vault bar + WKWebView fade in |
 
 Do not slide entire windows; the window may resize without animation.
 

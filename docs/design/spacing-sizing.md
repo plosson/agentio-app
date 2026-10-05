@@ -39,7 +39,7 @@ Do **not** use the old 560px slate card width.
 | Mode | Min width | Min height | Default (suggested) |
 |------|-----------|------------|---------------------|
 | Onboarding wizard | **480px** | **560px** | 520 × 640 |
-| Vault (bar + BrowserView) | **900px** | **640px** | 1100 × 760 |
+| Vault (bar + WKWebView) | **900px** | **640px** | 1100 × 760 |
 
 See [layout.md](./layout.md) for traffic lights and drag regions.
 
