@@ -46,11 +46,31 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.plosson.agentio-companion.AgentioKit
         GENERATE_INFOPLIST_FILE: YES
+  CompanionUI:
+    type: framework
+    platform: macOS
+    sources: [CompanionUI]
+    dependencies:
+      - target: AgentioKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.plosson.agentio-companion.CompanionUI
+        GENERATE_INFOPLIST_FILE: YES
   AgentioKitTests:
     type: bundle.unit-test
     platform: macOS
     sources: [AgentioKitTests]
     dependencies:
+      - target: AgentioKit
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+  CompanionUITests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [CompanionUITests]
+    dependencies:
+      - target: CompanionUI
       - target: AgentioKit
     settings:
       base:
@@ -64,6 +84,6 @@ schemes:
       config: Debug
     test:
       config: Debug
-      targets: [AgentioKitTests]
+      targets: [AgentioKitTests, CompanionUITests]
     archive:
       config: Release
