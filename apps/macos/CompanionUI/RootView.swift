@@ -18,6 +18,9 @@ public struct RootView: View {
                     .id(model.canManageProfiles)
                     .ignoresSafeArea()
                     .frame(minWidth: 1100, minHeight: 760)
+                    .sheet(item: Binding(get: { model.addFlow }, set: { if $0 == nil { model.closeAddFlow() } })) { flow in
+                        AddProfileSheet(flow: flow, close: model.closeAddFlow)
+                    }
             } else {
                 OnboardingView(model: model)
                     .frame(minWidth: 480, minHeight: 560)
