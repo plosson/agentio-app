@@ -10,6 +10,15 @@ struct HubURLTests {
         #expect(try normalizeHubBase("https://user:pw@vault.example.com", allowLocalHTTP: false) == "https://vault.example.com")
     }
 
+    @Test func addsHttpsWhenNoSchemeIsTyped() throws {
+        #expect(try normalizeHubBase("agentio.chuut.com", allowLocalHTTP: false) == "https://agentio.chuut.com")
+        #expect(try normalizeHubBase("  Agentio.Chuut.com/ui/#authorize=X ", allowLocalHTTP: false) == "https://agentio.chuut.com")
+        #expect(try normalizeHubBase("vault.example.com:8443", allowLocalHTTP: false) == "https://vault.example.com:8443")
+        #expect(try normalizeHubBase("vault.example.com:443/", allowLocalHTTP: false) == "https://vault.example.com")
+        // Plain http is never assumed, not even for loopback in dev.
+        #expect(try normalizeHubBase("localhost:7890", allowLocalHTTP: true) == "https://localhost:7890")
+    }
+
     @Test func emptyInputSaysSo() {
         for raw in ["", "   ", "///", "\n"] {
             #expect(throws: AgentioError("Vault URL is empty"), "raw: \(raw)") { try normalizeHubBase(raw, allowLocalHTTP: false) }
@@ -17,7 +26,8 @@ struct HubURLTests {
     }
 
     @Test func rejectsWhatIsNotAnHttpsHub() {
-        for raw in ["vault.example.com", "https://", "ftp://vault.example.com", "http://vault.example.com", "javascript:alert(1)", "https:// spaced.example.com"] {
+        for raw in ["https://", "ftp://vault.example.com", "http://vault.example.com", "javascript:alert(1)", "https:// spaced.example.com",
+                    "mailto:me@vault.example.com", "me@vault.example.com", "://vault.example.com", "vault example.com"] {
             #expect(throws: AgentioError.self, "raw: \(raw)") { try normalizeHubBase(raw, allowLocalHTTP: false) }
         }
     }

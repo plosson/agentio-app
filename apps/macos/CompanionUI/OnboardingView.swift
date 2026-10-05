@@ -169,7 +169,7 @@ struct HubURLScreen: View {
     var body: some View {
         Heading("Connect to your vault")
         Explanation("Enter the HTTPS URL of your AgentIO vault hub. Self-hosted or commercially hosted — same step.")
-        TextField("https://vault.example.com", text: $url)
+        TextField("vault.example.com", text: $url)
             .textFieldStyle(.roundedBorder)
             .font(Theme.mono)
             .onSubmit(signIn)
