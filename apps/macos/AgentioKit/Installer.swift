@@ -46,6 +46,8 @@ public struct CliVersion: Comparable, Sendable, CustomStringConvertible {
 public enum InstallProgress: Sendable, Equatable {
     case label(String)
     case percent(Double)
+    /// The installer finished; the installed agentio is being run.
+    case checking
 }
 
 /// One installer output line: nil for blank lines and for curl's
@@ -103,6 +105,7 @@ extension AgentioCLI {
             throw AgentioError("The installer \(reason)\(lines.isEmpty ? "" : ": " + lines.joined(separator: " · "))",
                                exitCode: result.exitCode)
         }
+        onProgress(.checking)
         guard let cli = await detect() else {
             throw AgentioError("The installer finished, but agentio could not be run")
         }

@@ -135,4 +135,21 @@ struct InstallTests {
         }
         #expect(!FileManager.default.fileExists(atPath: cli.location.binPath.path))
     }
+
+    @Test func saysItChecksTheInstalledCliLastAfterTheInstallerOutput() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = AgentioCLI(location: CliLocation(root: dir.url), baseEnvironment: plainEnv)
+        let log = ProgressLog()
+        _ = try await cli.install(atLeast: minimumCliVersion, fetchScript: { Data(fakeInstaller().utf8) }, onProgress: log.add)
+        #expect(log.all.last == .checking)
+        #expect(log.all.filter { $0 == .checking }.count == 1)
+    }
+
+    @Test func aFailedInstallerNeverSaysItChecks() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = AgentioCLI(location: CliLocation(root: dir.url), baseEnvironment: plainEnv)
+        let log = ProgressLog()
+        _ = try? await cli.install(atLeast: minimumCliVersion, fetchScript: { Data("exit 3".utf8) }, onProgress: log.add)
+        #expect(!log.all.contains(.checking))
+    }
 }

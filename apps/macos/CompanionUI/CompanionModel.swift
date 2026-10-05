@@ -134,6 +134,7 @@ public final class CompanionModel {
         switch progress {
         case .label(let text): installLabel = text
         case .percent(let percent): installPercent = 5 + Int((min(max(percent, 0), 100) * 0.9).rounded())
+        case .checking: break
         }
     }
 
