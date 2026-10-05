@@ -1,10 +1,10 @@
 # Layout
 
-Electron window geometry and region rules for AgentIO Companion, plus vault hub `/ui` content width. Colors, type, radii, and buttons match System Utility Vault everywhere — only density differs.
+Window geometry and region rules for AgentIO Companion, plus vault hub `/ui` content width. Colors, type, radii, and buttons match System Utility Vault everywhere — only density differs.
 
 ---
 
-## Electron window sizing
+## Window sizing
 
 | Mode | Min W×H | Default W×H | Resizable |
 |------|---------|-------------|-----------|
@@ -23,20 +23,7 @@ Switching modes may `setMinimumSize` / `setSize` in main process; avoid animatin
 
 macOS-first:
 
-```js
-// BrowserWindow (illustrative)
-{
-  titleBarStyle: 'hiddenInset',
-  trafficLightPosition: { x: 16, y: 18 }, // tune to bar height
-  // vibrancy optional — prefer solid --color-bg for predictability
-}
-```
-
-| Region | Rules |
-|--------|-------|
-| Titlebar / vault bar background | `-webkit-app-region: drag` |
-| Buttons, inputs, cards, links | `-webkit-app-region: no-drag` |
-| Traffic lights | OS-owned; leave left inset clear (**≥70px** content offset on first row if custom controls sit top-left) |
+The window is a standard SwiftUI `Window` with the system title bar and traffic lights. A custom unified title bar is later polish (spec phase F); if added, keep the traffic lights' area clear (**≥70px** content offset on the first row if custom controls sit top-left).
 
 Onboarding: no custom close buttons — use OS lights.  
 Vault bar: place host label to the **right** of traffic-light clearance.
@@ -67,14 +54,14 @@ Vertical centering: acceptable for short screens (Welcome). Prefer **top-weighte
 
 ---
 
-## Vault mode (bar + BrowserView)
+## Vault mode (bar + WKWebView)
 
 ```
 ┌──────────────────────────────────────────┐
 │  Vault companion bar (40px, drag)        │
 ├──────────────────────────────────────────┤
 │                                          │
-│  BrowserView → https://<hub>/ui          │
+│  WKWebView → https://<hub>/ui          │
 │  (or local vault UI surface)             │
 │                                          │
 └──────────────────────────────────────────┘
@@ -83,11 +70,11 @@ Vertical centering: acceptable for short screens (Welcome). Prefer **top-weighte
 | Part | Spec |
 |------|------|
 | Bar height | **40px** fixed |
-| BrowserView bounds | `y = 40`, height = `window - 40` (account for devicePixelRatio in main) |
+| WKWebView bounds | `y = 40`, height = `window - 40` |
 | Safe padding in bar | `12px` horizontal; left offset clear of traffic lights |
-| Overlay sheets (PTY / OAuth) | Prefer child window or modal over drawing on BrowserView; scrim `--color-overlay` |
+| Overlay sheets (PTY / OAuth) | Prefer child window or modal over drawing on WKWebView; scrim `--color-overlay` |
 
-Companion does **not** CSS-inject into the hub `BrowserView`. The hub ships System Utility Vault natively (`plosson/agentio` `src/daemon/ui/index.html`). Vault bar surface/border should match the hub header so chrome feels continuous.
+Companion does **not** CSS-inject into the hub `WKWebView`. The hub ships System Utility Vault natively (`plosson/agentio` `src/daemon/ui/index.html`). Vault bar surface/border should match the hub header so chrome feels continuous.
 
 ---
 
@@ -97,14 +84,14 @@ Companion does **not** CSS-inject into the hub `BrowserView`. The hub ships Syst
 |------|------------|-----------|
 | Top | Titlebar inset + 40px | Traffic lights + 12px |
 | Sides | 24px | 12px |
-| Bottom | 48px | n/a (BrowserView flush) |
+| Bottom | 48px | n/a (WKWebView flush) |
 | Focus rings | Keep ≥2px inside window edge | Same |
 
 ---
 
 ## Z-order
 
-1. BrowserView / wizard content  
+1. WKWebView / wizard content  
 2. Tip/status callouts in flow (not floating toast required for MVP)  
 3. Modal sheets + overlay  
 4. OS titlebar controls  
@@ -116,7 +103,7 @@ No persistent floating FAB.
 
 ## Hub `/ui` content layout
 
-Hub is a normal document inside the BrowserView (or a browser tab).
+Hub is a normal document inside the WKWebView (or a browser tab).
 
 ```
 ┌─ header (surface + bottom border) ──────── tabs ── meta ─┐

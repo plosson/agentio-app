@@ -149,7 +149,7 @@ Update `plosson/agentio` `src/daemon/ui/index.html` and any copy of the old pale
 
 | Forbidden | Why |
 |-----------|-----|
-| Sky cyan `#38bdf8` / `#7dd3fc` as primary or accent | Old companion renderer palette; fights System Utility direction |
+| Sky cyan `#38bdf8` / `#7dd3fc` as primary or accent | Old companion palette; fights System Utility direction |
 | GitHub blue `#0969da` / `#58a6ff` as accent or primary | Old hub palette; replaced by teal + black/white pills |
 | Slate panels `#0f172a`, `#1e293b`, `#334155` | SaaS “dark card” look |
 | Random gradients (purple→blue, mesh, aurora) | Marketing, not utility |

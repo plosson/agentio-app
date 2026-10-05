@@ -2,7 +2,7 @@
 
 AgentIO’s local companion UI **and** the vault hub `/ui` share one visual language: a **macOS system utility** — calm, precise, and embedded in the desktop — not a marketing SaaS shell and not a GitHub-blue admin panel.
 
-Product behavior for the companion lives in [electron-companion-spec.md](../plans/electron-companion-spec.md). Hub behavior lives in `plosson/agentio`. This doc locks the **visual principles** and the **unified screen map** implementers must follow.
+Product behavior for the companion lives in [companion-spec.md](../plans/companion-spec.md). Hub behavior lives in `plosson/agentio`. This doc locks the **visual principles** and the **unified screen map** implementers must follow.
 
 Principles apply **everywhere** — companion onboarding, companion vault bar, and every hub screen (Unlock, Profiles, API keys, Settings, Authorize, dialogs, toasts). There is no “hub keeps its own CSS” exception.
 
@@ -32,7 +32,7 @@ Companion chrome bar + hub content should feel **continuous**: same soft-zinc ba
 ### 4. Quiet chrome
 
 - Onboarding: minimal titlebar, centered column, no sidebar, no marketing hero.
-- Vault mode: thin companion bar + hub `/ui` in a `BrowserView` — chrome stays out of the way; bar surface matches hub header.
+- Vault mode: thin companion bar + hub `/ui` in a `WKWebView` — chrome stays out of the way; bar surface matches hub header.
 - Elevation is subtle (1px borders, soft radius); avoid heavy drop shadows and glass stacks.
 
 ---
@@ -51,7 +51,7 @@ Companion chrome bar + hub content should feel **continuous**: same soft-zinc ba
 | Checklist + tip strips for delight | Mascots, confetti, emoji explosions |
 | WCAG AA text/button contrast | Low-contrast muted-on-muted labels |
 | `prefers-reduced-motion` respect | Endless bounce animations |
-| Hub ships shared look natively | Companion CSS-inject into BrowserView |
+| Hub ships shared look natively | Companion CSS-inject into WKWebView |
 
 ---
 
@@ -71,7 +71,7 @@ Use as **reference only**; do not copy artwork or copywriting:
 
 ## Unified screen map
 
-### Companion (local Electron renderer)
+### Companion (native macOS app)
 
 ```
   [Welcome]
@@ -108,7 +108,7 @@ Use as **reference only**; do not copy artwork or copywriting:
 
 Returning users may skip Welcome→CLI ready when CLI is current, and may skip Choose vault / URL when preferences are remembered (see product spec).
 
-### Vault hub (`/ui` in BrowserView or browser)
+### Vault hub (`/ui` in WKWebView or browser)
 
 ```
   [Unlock] ──passphrase──► [Profiles] ←→ [API keys] ←→ [Settings]

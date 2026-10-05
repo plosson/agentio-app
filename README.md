@@ -1,79 +1,48 @@
 # AgentIO Companion
 
-Electron companion for a remote AgentIO vault hub.
+Native macOS app (Swift, SwiftUI) for an AgentIO vault: a remote hub or a local vault.
 
-The app walks first-launch onboarding (CLI install/update → vault URL → passphrase), then `loadURL`s the hub’s `/ui`. A narrow preload bridge (`window.agentioCompanion`) lets the shared admin HTML show **Add profile** / **Reauth** only inside the companion. The AgentIO CLI is **not** bundled; onboarding installs or updates it separately.
+The app installs its own copy of the AgentIO CLI, at least the version the hub runs, then signs in to a hub (or creates a local vault) and shows the vault's `/ui` page. New AgentIO services and plugins need no app update: the hub's page shows them, and the app updates its CLI when the hub is newer. A narrow bridge (`window.agentioCompanion`) lets the vault page show **Add profile** and **Reauth** only inside the app. The CLI is not bundled in the app.
 
 ## Status
 
-Skeleton (Phase B wireframe). Onboarding screens S1–S6 are stubbed; CLI download/install is fake progress; unlock does not call the hub yet; vault window can `loadURL` a configurable hub URL; PTY / OAuth (S7) is not implemented. See the locked product decisions in the spec.
+Onboarding, CLI install, hub sign-in, local vault and the vault window work. Add profile, Reauth and Open terminal only log a message for now: the terminal (spec S7) comes next.
 
 ## Spec
 
-Full project specification:
-
-- [`docs/plans/electron-companion-spec.md`](docs/plans/electron-companion-spec.md) (v0.9)
-
-## Layout
-
-```
-apps/desktop/     Electron main, preload, onboarding renderer (Vite)
-docs/plans/       Product / architecture spec
-```
-
-Desktop-only pnpm workspace (mirrors [plosson/app-starter](https://github.com/plosson/app-starter) desktop conventions; no mobile/web apps).
+- [`docs/plans/companion-spec.md`](docs/plans/companion-spec.md): product and architecture
+- [`docs/design/`](docs/design/): design system
 
 ## Requirements
 
-- Node.js ≥ 20
-- pnpm 9 (`corepack enable` or install pnpm)
+- macOS 14 or later, Xcode 26
+- XcodeGen: `brew install xcodegen`
+- For a remote vault: a hub whose `GET /health` reports `version` (agentio after 3.12.2)
 
-## Setup
-
-```bash
-pnpm install
-```
-
-## Run (desktop)
+## Build, test and run
 
 ```bash
-# From repo root — builds main/preload, starts Vite for onboarding, launches Electron
-pnpm desktop
-# or
-pnpm --filter @agentio/desktop dev
+cd apps/macos
+xcodegen generate                       # creates AgentioCompanion.xcodeproj
+open AgentioCompanion.xcodeproj         # or use the commands below
+
+xcodebuild -scheme AgentioCompanion -destination 'platform=macOS' -derivedDataPath build test
+xcodebuild -scheme AgentioCompanion -configuration Debug -derivedDataPath build build
+open "build/Build/Products/Debug/AgentIO Companion.app"
 ```
 
-Headless / CI (no GUI): typecheck and build without launching Electron:
+Logs: `log stream --predicate 'subsystem == "com.plosson.agentio-companion"'`
 
-```bash
-pnpm typecheck
-pnpm build
-```
+## Where the app keeps things
 
-## Pack
+| What | Where |
+|------|-------|
+| The app's CLI and its HOME | `~/Library/Application Support/com.plosson.agentio-companion/cli/` |
+| Remembered hub URL | `defaults read com.plosson.agentio-companion` |
 
-```bash
-pnpm pack:desktop:dir      # unpacked dir
-pnpm pack:desktop:linux    # AppImage / deb (Linux)
-pnpm pack:desktop          # mac / win / linux targets via electron-builder
-```
+## Bridge
 
-## What is stubbed vs real
-
-| Piece | Status |
-|-------|--------|
-| Repo layout, TypeScript, electron-builder scripts | Real |
-| `contextIsolation` + `window.agentioCompanion` bridge | Real (stubs log / IPC) |
-| Onboarding screen router S1–S6 | Real UI placeholders |
-| CLI install / update download | **Stub** (fake progress) |
-| Passphrase unlock against hub | **Stub** (proceeds to vault window) |
-| Vault `BrowserWindow` `loadURL(hub + '/ui')` | Real wiring (needs a reachable hub) |
-| PTY / Add profile OAuth (S7) | Not yet |
-| Commercial account login | Out of scope (by design) |
-
-## Bridge (Option A)
-
-Preload exposes:
+The vault page gets:
 
 ```ts
 window.agentioCompanion = {
@@ -84,7 +53,7 @@ window.agentioCompanion = {
 }
 ```
 
-`nodeIntegration` is off; the bridge does not expose shell, tokens, or passphrase APIs.
+Only the main frame gets it. It exposes no shell, tokens or passphrase APIs.
 
 ## License
 

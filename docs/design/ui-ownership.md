@@ -10,9 +10,9 @@
 | Rule | Detail |
 |------|--------|
 | **One design system** | System Utility Vault tokens, type, radii, and component language apply to companion **and** hub. |
-| **No CSS injection** | Companion must **not** inject CSS into the hub `BrowserView`. The hub ships the shared look in `src/daemon/ui/index.html`. |
+| **No CSS injection** | Companion must **not** inject CSS into the hub `WKWebView`. The hub ships the shared look in `src/daemon/ui/index.html`. |
 | **Tokens are the contract** | Change hex/roles here first; mirror into hub CSS variables in `plosson/agentio`. Companion imports `tokens.css` (or a packaged copy). |
-| **Behavior stays local** | Companion owns Electron IPC, CLI install, device-code polling. Hub owns vault unlock, profiles, keys, settings, authorize. |
+| **Behavior stays local** | Companion owns the `window.agentioCompanion` bridge, CLI install, device-code polling. Hub owns vault unlock, profiles, keys, settings, authorize. |
 
 ---
 
@@ -20,7 +20,7 @@
 
 | Screen | Product surface | Implements in | Notes |
 |--------|-----------------|---------------|-------|
-| Welcome | Companion onboarding | `plosson/agentio-app` → `apps/desktop` | Local renderer |
+| Welcome | Companion onboarding | `plosson/agentio-app` → `apps/macos` | SwiftUI |
 | CLI progress / ready | Companion onboarding | agentio-app | |
 | Choose vault | Companion onboarding | agentio-app | |
 | Connect URL | Companion onboarding | agentio-app | |

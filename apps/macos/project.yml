@@ -1,0 +1,90 @@
+# Generates AgentioCompanion.xcodeproj (not committed): run `xcodegen generate`.
+name: AgentioCompanion
+options:
+  bundleIdPrefix: com.plosson
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    # Ad-hoc ("Sign to Run Locally") until Developer ID signing (spec phase E).
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+targets:
+  AgentioCompanion:
+    type: application
+    platform: macOS
+    sources: [AgentioCompanion]
+    dependencies:
+      - target: AgentioKit
+      - target: CompanionUI
+    info:
+      path: AgentioCompanion/Info.plist
+      properties:
+        CFBundleDisplayName: AgentIO Companion
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSHumanReadableCopyright: Copyright © Pierre A. Losson
+        NSAppTransportSecurity:
+          # The local vault's daemon and dev hubs on http://127.0.0.1 / localhost.
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.plosson.agentio-companion
+        PRODUCT_NAME: AgentIO Companion
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # No App Sandbox: the app installs and runs the agentio CLI.
+        ENABLE_HARDENED_RUNTIME: YES
+  AgentioKit:
+    type: framework
+    platform: macOS
+    sources: [AgentioKit]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.plosson.agentio-companion.AgentioKit
+        GENERATE_INFOPLIST_FILE: YES
+  CompanionUI:
+    type: framework
+    platform: macOS
+    sources: [CompanionUI]
+    dependencies:
+      - target: AgentioKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.plosson.agentio-companion.CompanionUI
+        GENERATE_INFOPLIST_FILE: YES
+  AgentioKitTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [AgentioKitTests]
+    dependencies:
+      - target: AgentioKit
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+  CompanionUITests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [CompanionUITests]
+    dependencies:
+      - target: CompanionUI
+      - target: AgentioKit
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  AgentioCompanion:
+    build:
+      targets:
+        AgentioCompanion: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [AgentioKitTests, CompanionUITests]
+    archive:
+      config: Release

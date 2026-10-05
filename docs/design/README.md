@@ -1,43 +1,39 @@
 # System Utility Vault — Design System
 
-**Product surfaces:** AgentIO Companion (Electron) **and** AgentIO vault hub `/ui`  
+**Product surfaces:** AgentIO Companion (native macOS app, Swift/SwiftUI) **and** AgentIO vault hub `/ui`  
 **Visual direction:** System Utility Vault  
 **Status:** Shared source of truth for look & feel across both apps  
-**Spec (companion behavior):** [docs/plans/electron-companion-spec.md](../plans/electron-companion-spec.md)  
+**Spec (companion behavior):** [docs/plans/companion-spec.md](../plans/companion-spec.md)  
 **Hub UI implementation:** [`plosson/agentio` → `src/daemon/ui/index.html`](https://github.com/plosson/agentio/blob/main/src/daemon/ui/index.html)
 
 This folder is the single look-and-feel contract for implementers of:
 
-1. **Electron companion** local renderer — onboarding wizard + thin vault bar (`apps/desktop` in this repo)
+1. **Companion** native chrome — onboarding screens + thin vault bar (`apps/macos` in this repo)
 2. **AgentIO vault hub** — Unlock, Profiles, API keys, Settings, Authorize + dialogs/toasts (`plosson/agentio`)
 
-Prefer these docs over ad-hoc choices. When rendering UI, use [`tokens.css`](./tokens.css) as the contract and match component anatomy in [`components.md`](./components.md).
+Prefer these docs over ad-hoc choices. [`tokens.css`](./tokens.css) is the contract: the companion uses the `Theme` tokens in `apps/macos/CompanionUI/Theme.swift`, which mirror it. Match component anatomy in [`components.md`](./components.md).
 
-**One visual system, two code homes** — see [ui-ownership.md](./ui-ownership.md). Companion must **not** CSS-inject into the hub `BrowserView`; the hub ships the shared look natively.
+**One visual system, two code homes** — see [ui-ownership.md](./ui-ownership.md). The companion must **not** inject CSS into the hub page in its web view; the hub ships the shared look natively.
 
 ---
 
 ## How to use this system
 
 1. **Read the vibe** — skim [overview.md](./overview.md) principles and the unified screen map before touching layout or color.
-2. **Import / mirror tokens** — Companion: `@import` or copy [`tokens.css`](./tokens.css). Hub: map the same semantic values into `src/daemon/ui/index.html` CSS variables (keep names local if needed, keep hex/roles identical).
+2. **Use / mirror tokens** — Companion: SwiftUI code uses `Theme`, which copies the values of [`tokens.css`](./tokens.css); add a token to `tokens.css` and `Theme.swift` together. Hub: map the same semantic values into `src/daemon/ui/index.html` CSS variables (keep names local if needed, keep hex/roles identical).
 3. **Build screens from components** — use [`components.md`](./components.md) + [`layout.md`](./layout.md); copy markup patterns from [`examples.md`](./examples.md) (companion **and** hub examples).
 4. **Motion last** — follow [`motion-feedback.md`](./motion-feedback.md) for progress, checklists, busy states, and `prefers-reduced-motion`.
-5. **Migrate, don’t fork** — Companion: replace slate + sky cyan in `apps/desktop/src/renderer/styles.css`. Hub: replace deprecated GitHub blue `#0969da` with teal + near-black/white pills. Do not keep parallel palettes.
+5. **Migrate, don’t fork** — Hub: replace deprecated GitHub blue `#0969da` with teal + near-black/white pills. Do not keep parallel palettes.
 
-### Token import note (companion)
+### Tokens in the app
 
-```css
-/* apps/desktop renderer — prefer this over hard-coded slate/sky */
-@import url("../../../../docs/design/tokens.css");
-/* or, once packaged: copy tokens.css into src/renderer/tokens.css and import locally */
-```
+`tokens.css` is the source of truth for values. `apps/macos/CompanionUI/Theme.swift` copies its light and dark colours, type sizes and control sizes; the app follows the system appearance.
 
 ### Token contract (hub)
 
-`tokens.css` is the **shared contract**. The hub may keep short local variable names (`--bg`, `--accent`, …) as long as they resolve to the same semantic values documented in [colors.md](./colors.md). When tokens change here, update the hub CSS in the same change set when possible.
+`tokens.css` is the **shared contract**. The hub may keep short local variable names (`--bg`, `--accent`, …) as long as they resolve to the same semantic values documented in [colors.md](./colors.md). When tokens change here, update the hub CSS and `Theme.swift` in the same change set when possible.
 
-CSS custom properties live on `:root` (light) and `@media (prefers-color-scheme: dark)` / `[data-theme="dark"]`. Electron can force theme via `data-theme` on `<html>` if the user preference should override OS.
+CSS custom properties live on `:root` (light) and `@media (prefers-color-scheme: dark)` / `[data-theme="dark"]`.
 
 ---
 
@@ -79,8 +75,8 @@ Away from: slate `#0f172a` / `#1e293b` panels, sky `#38bdf8` primaries, hub GitH
 | Concern | Home |
 |---------|------|
 | Design tokens & guidelines | This folder (`docs/design/` in **agentio-app**) |
-| Companion product behavior & screen flow | `docs/plans/electron-companion-spec.md` |
-| Companion implementation | `apps/desktop` (must converge on these tokens) |
+| Companion product behavior & screen flow | `docs/plans/companion-spec.md` |
+| Companion implementation | `apps/macos` (`Theme.swift` mirrors these tokens) |
 | Vault hub `/ui` implementation | `plosson/agentio` → `src/daemon/ui/` (ships shared look natively) |
 
 See [ui-ownership.md](./ui-ownership.md) for the screen → repo table.

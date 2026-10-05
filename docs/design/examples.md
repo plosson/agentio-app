@@ -350,12 +350,12 @@ Covers **companion** onboarding and **vault hub** `/ui`. Assume `tokens.css` is 
 Thin companion bar that visually matches the hub header (same surface / border family).
 
 ```html
-<!-- Companion renderer: vault bar -->
+<!-- Companion: vault bar -->
 <div class="vault-bar" role="banner">
   <span class="vault-bar-host mono">vault.example.com</span>
   <button class="btn-icon" type="button" aria-label="Menu">⋯</button>
 </div>
-<!-- BrowserView hosts hub /ui below -->
+<!-- WKWebView hosts hub /ui below -->
 ```
 
 ```css
@@ -582,6 +582,6 @@ Thin companion bar that visually matches the hub header (same surface / border f
 
 ## Migration note
 
-**Companion:** replace slate/sky rules in `apps/desktop/src/renderer/styles.css` with the patterns above and the shared tokens file. Keep behavior (IPC, screens) unchanged while swapping visuals.
+**Companion:** `apps/macos/CompanionUI/Theme.swift` mirrors the shared tokens; build SwiftUI screens from the patterns above.
 
-**Hub:** replace `#0969da` / GitHub-blue variables in `plosson/agentio` `src/daemon/ui/index.html` with System Utility Vault teal + near-black/white CTAs. Keep JS, HTML structure, and CSP nonce intact. Do not inject companion CSS into the BrowserView.
+**Hub:** replace `#0969da` / GitHub-blue variables in `plosson/agentio` `src/daemon/ui/index.html` with System Utility Vault teal + near-black/white CTAs. Keep JS, HTML structure, and CSP nonce intact. Do not inject companion CSS into the WKWebView.

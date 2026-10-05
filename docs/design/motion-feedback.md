@@ -109,9 +109,9 @@ No confetti, no full-screen green wash, no haptic assumptions.
 |------------|------|
 | Wizard step forward | Cross-fade 200–320ms; optional 4px upward drift on entering content |
 | Back | Same, reverse drift |
-| To vault mode | Fade wizard out 200ms; vault bar + BrowserView fade in |
+| To vault mode | Fade wizard out 200ms; vault bar + WKWebView fade in |
 
-Do not slide entire windows; Electron window size may change without animated CSS.
+Do not slide entire windows; the window may resize without animation.
 
 ---
 
@@ -140,4 +140,4 @@ Still update **content** promptly — reduced motion is not reduced feedback.
 }
 ```
 
-Prefer finer-grained overrides (disable spinner animation only) so focus rings still ease if desired — either approach is acceptable if documented in renderer.
+Prefer finer-grained overrides (disable spinner animation only) so focus rings still ease if desired — either approach is acceptable if documented in the code.

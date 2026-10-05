@@ -3,13 +3,10 @@
  * Source of truth: docs/design/*.md
  *
  * Surfaces:
- *   - AgentIO Companion Electron renderer (import / copy this file)
+ *   - AgentIO Companion macOS app (apps/macos/CompanionUI/Theme.swift copies these values)
  *   - AgentIO vault hub /ui (mirror semantic values in src/daemon/ui/index.html)
  *
- * Migrate companion off slate (#0f172a/#1e293b) + sky (#38bdf8).
  * Migrate hub off GitHub blue (#0969da / #58a6ff).
- *
- *   @import url("./tokens.css");
  */
 
 :root {
@@ -171,7 +168,7 @@
   }
 }
 
-/* Explicit theme override (Electron / settings). Mirrors dark media query. */
+/* Explicit theme override (settings). Mirrors dark media query. */
 [data-theme="dark"] {
   color-scheme: dark;
 
