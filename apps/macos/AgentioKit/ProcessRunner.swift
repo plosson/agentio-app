@@ -63,6 +63,7 @@ private final class RunState: @unchecked Sendable {
     private var killRequested = false
     private var exited = false
     private var exitCode: Int32?
+    private var pipes: [Pipe] = []
 
     /// Bytes read so far, split into lines as they arrive.
     private struct Stream {
@@ -99,7 +100,10 @@ private final class RunState: @unchecked Sendable {
         errPipe.fileHandleForReading.readabilityHandler = { [self] handle in
             didRead(handle.availableData, .stderr, handle)
         }
-        lock.withLock { self.continuation = continuation }
+        lock.withLock {
+            self.continuation = continuation
+            pipes = [outPipe, errPipe]
+        }
         do {
             try process.run()
         } catch {
@@ -127,12 +131,25 @@ private final class RunState: @unchecked Sendable {
     }
 
     /// SIGTERM, once the process runs (a cancel can come before it starts).
+    /// If it already exited but a descendant still holds the pipes open,
+    /// stop waiting for EOF and finish with what was read.
     func kill() {
-        let running = lock.withLock {
+        let (running, exitedOpen) = lock.withLock {
             if !started { killRequested = true }
-            return started && !exited
+            return (started && !exited, started && exited)
         }
         if running { process.terminate() }
+        if exitedOpen { abandonPipes() }
+    }
+
+    private func abandonPipes() {
+        let open = lock.withLock { pipes }
+        for pipe in open { pipe.fileHandleForReading.readabilityHandler = nil }
+        let flushed = lock.withLock {
+            finishStream(.stdout).map { ($0, OutputSource.stdout) } + finishStream(.stderr).map { ($0, OutputSource.stderr) }
+        }
+        for (line, source) in flushed { onLine?(line, source) }
+        finishIfDone()
     }
 
     private func didRead(_ data: Data, _ source: OutputSource, _ handle: FileHandle) {

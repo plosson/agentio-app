@@ -87,6 +87,27 @@ struct ProcessRunnerTests {
         #expect(clock.now - start < .seconds(5))
     }
 
+    @Test func aGrandchildHoldingThePipesDoesNotOutlastATimeoutAfterANormalExit() async throws {
+        let clock = ContinuousClock()
+        let start = clock.now
+        // sh exits 0 at once; the background sleep keeps the pipes open.
+        let result = try await run(sh, ["-c", "echo done; sleep 30 & exit 0"], RunOptions(environment: plainEnv, timeout: .milliseconds(300)))
+        #expect(result.exitCode == 0)
+        #expect(result.stdout == "done\n")
+        #expect(clock.now - start < .seconds(5))
+    }
+
+    @Test func cancellingUnblocksANormalExitWhoseGrandchildHoldsThePipes() async throws {
+        let clock = ContinuousClock()
+        let start = clock.now
+        let task = Task { try await run(sh, ["-c", "sleep 30 & exit 0"], RunOptions(environment: plainEnv, timeout: .seconds(60))) }
+        try await Task.sleep(for: .milliseconds(300))
+        task.cancel()
+        let result = try await task.value
+        #expect(result.exitCode == 0)
+        #expect(clock.now - start < .seconds(5))
+    }
+
     @Test func cancellingTheTaskKillsTheCommand() async throws {
         let clock = ContinuousClock()
         let start = clock.now
