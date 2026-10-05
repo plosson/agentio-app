@@ -12,11 +12,11 @@ public enum Screen: Equatable, Sendable {
     case hubURL
     /// `agentio login` runs: waiting for its code, then for approval.
     case login
-    /// The hub's approval page shows below the app's bar.
+    /// The hub's approval page fills the window.
     case approving
     /// Create a local vault.
     case local
-    /// S6: the hub's page shows below the app's bar.
+    /// S6: the hub's page fills the window.
     case vault
 }
 
@@ -36,7 +36,7 @@ public final class CompanionModel {
     /// The hub's base URL: remembered, entered, or reported by the CLI.
     public private(set) var hubURL = ""
     public var rememberURL = true
-    /// The hub page shown below the app's bar; nil shows the app's own screens.
+    /// The hub page that fills the window; nil shows the app's own screens.
     public private(set) var vaultPage: URL?
 
     private let backend: any CompanionBackend

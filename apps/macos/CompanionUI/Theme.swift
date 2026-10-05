@@ -27,7 +27,6 @@ enum Theme {
     static let controlHeight: CGFloat = 40
     static let radiusControl: CGFloat = 8
     static let radiusCard: CGFloat = 12
-    static let vaultBarHeight: CGFloat = 40
 
     private static func dynamic(light: UInt32, dark: UInt32) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in

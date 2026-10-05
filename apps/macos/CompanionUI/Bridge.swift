@@ -7,6 +7,9 @@ public enum BridgeCall: Equatable, Sendable {
     case addProfile(service: String)
     case reauth(service: String, name: String?)
     case openTerminal
+    /// Move the window with the mouse: the page calls it on a mouse-down in
+    /// an empty part of its headers (WKWebView ignores `app-region: drag`).
+    case dragWindow
 
     /// The message `bridgeScript` posts, `{ method, args }`; nil for anything else.
     public init?(message body: Any) {
@@ -20,6 +23,7 @@ public enum BridgeCall: Equatable, Sendable {
         case ("reauth", 1): self = .reauth(service: strings[0], name: nil)
         case ("reauth", 2): self = .reauth(service: strings[0], name: strings[1])
         case ("openTerminal", 0): self = .openTerminal
+        case ("dragWindow", 0): self = .dragWindow
         default: return nil
         }
     }
@@ -41,6 +45,7 @@ let bridgeScript = """
       addProfile: (service) => call("addProfile", [service]),
       reauth: (service, name) => call("reauth", name == null ? [service] : [service, name]),
       openTerminal: () => call("openTerminal", []),
+      dragWindow: () => call("dragWindow", []),
     }),
   });
 })();
@@ -110,8 +115,9 @@ final class BridgeHandler: NSObject, WKScriptMessageHandlerWithReply {
 
 private let bridgeLog = Logger(subsystem: "com.plosson.agentio-companion", category: "bridge")
 
-/// The bridge's actions. Stubs until the terminal (S7) exists.
-@MainActor func performBridgeCall(_ call: BridgeCall) {
+/// The bridge's actions, for the page in `webView`. The profile and
+/// terminal actions are stubs until the terminal (S7) exists.
+@MainActor func performBridgeCall(_ call: BridgeCall, in webView: HubWebView?) {
     switch call {
     case .addProfile(let service):
         bridgeLog.notice("[bridge stub] addProfile(\(service, privacy: .public)) — PTY later")
@@ -119,5 +125,7 @@ private let bridgeLog = Logger(subsystem: "com.plosson.agentio-companion", categ
         bridgeLog.notice("[bridge stub] reauth(\(service, privacy: .public), \(name ?? "nil", privacy: .public)) — PTY later")
     case .openTerminal:
         bridgeLog.notice("[bridge stub] openTerminal() — PTY later")
+    case .dragWindow:
+        webView?.dragWindow()
     }
 }
