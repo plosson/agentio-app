@@ -1,4 +1,5 @@
 import AgentioKit
+import AppKit
 import Foundation
 import Observation
 
@@ -18,6 +19,13 @@ public enum Screen: Equatable, Sendable {
     case local
     /// S6: the hub's page fills the window.
     case vault
+}
+
+/// A profile the hub page should learn about: it was just added.
+public struct PageNotice: Equatable, Sendable {
+    public let id: UUID
+    public let service: String
+    public let profile: String
 }
 
 /// The onboarding's state and steps. Views read it and call its steps.
@@ -43,7 +51,13 @@ public final class CompanionModel {
     /// in again when it is false.
     public private(set) var canManageProfiles: Bool?
 
+    /// The add-profile sheet; nil when none is open.
+    public private(set) var addFlow: AddProfileFlow?
+    /// The last profile added, for the page to pick up.
+    public private(set) var pageNotice: PageNotice?
+
     private let backend: any CompanionBackend
+    private let openURL: @MainActor (URL) -> Void
     private let settings: CompanionSettings
     private let allowLocalHTTP: Bool
     private let deviceName: String
@@ -52,8 +66,10 @@ public final class CompanionModel {
     private var loginID: UUID?
     private var daemon: (any LocalDaemon)?
 
-    public init(backend: any CompanionBackend, settings: CompanionSettings, allowLocalHTTP: Bool, deviceName: String) {
+    public init(backend: any CompanionBackend, settings: CompanionSettings, allowLocalHTTP: Bool, deviceName: String,
+                openURL: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }) {
         self.backend = backend
+        self.openURL = openURL
         self.settings = settings
         self.allowLocalHTTP = allowLocalHTTP
         self.deviceName = deviceName
@@ -308,6 +324,7 @@ public final class CompanionModel {
 
     /// Back to the app's own screens (the local daemon, if any, keeps running).
     public func switchVault() async {
+        closeAddFlow()
         vaultPage = nil
         await enterMode()
     }
@@ -315,9 +332,30 @@ public final class CompanionModel {
     /// The hub's page asked for a key that may manage profiles: sign in to
     /// the same hub again, from the app's own screens. Only for a remote vault.
     public func signInAgain() async {
+        closeAddFlow()
         guard screen == .vault, hubURL != daemon?.url.absoluteString else { return }
         vaultPage = nil
         await signIn(url: hubURL, remember: settings.rememberedHubURL == hubURL)
+    }
+
+    // MARK: Adding a profile (from the hub page)
+
+    /// The hub page asked to add `service`. Only on an open remote vault whose key may manage profiles,
+    /// and one at a time.
+    public func addProfile(service: String, displayName: String?) {
+        guard screen == .vault, hubURL != daemon?.url.absoluteString, canManageProfiles == true, addFlow == nil else { return }
+        let flow = AddProfileFlow(service: service, displayName: displayName ?? service, backend: backend,
+                                  openURL: openURL) { [weak self] service, profile in
+            self?.pageNotice = PageNotice(id: UUID(), service: service, profile: profile)
+        }
+        addFlow = flow
+        Task { await flow.start() }
+    }
+
+    /// Close the sheet; an add still running is stopped.
+    public func closeAddFlow() {
+        addFlow?.cancel()
+        addFlow = nil
     }
 
     /// Before quitting: no sign-in left polling the hub, no daemon left running.
