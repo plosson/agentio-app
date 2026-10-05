@@ -109,3 +109,105 @@ func setupEvent(_ event: CliEvent) throws -> SetupEvent? {
         return nil
     }
 }
+
+/// A service id as agentio names them; anything else never reaches a command line.
+func isServiceID(_ text: String) -> Bool {
+    text.range(of: #"^[a-z0-9][a-z0-9-]*$"#, options: .regularExpression) != nil
+}
+
+func invalidService(_ text: String) -> AgentioError { AgentioError("Not a service: \(text)") }
+
+/// One JSON object on one line, for agentio's stdin.
+func jsonLine(_ object: [String: String]) -> String {
+    let data = (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data("{}".utf8)
+    return String(decoding: data, as: UTF8.self) + "\n"
+}
+
+/// A running `profile add --json`.
+public protocol ProfileAddRunning: AnyObject, Sendable {
+    /// Answer the question the run asked (`.ask`).
+    func answer(id: String, value: String)
+    /// Stop the run; `finished()` then throws "cancelled".
+    func cancel()
+    /// The new profile's name once added; the failure otherwise.
+    func finished() async throws -> String
+}
+
+final class ProfileAddRun: ProfileAddRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: AgentioProcess?
+    private var cancelled = false
+    private var unreadable = false
+
+    /// Events can arrive before this; an unreadable one then stops the process here.
+    func attach(_ process: AgentioProcess) {
+        let stopNow = lock.withLock { () -> Bool in
+            self.process = process
+            return unreadable || cancelled
+        }
+        if stopNow { process.stop() }
+    }
+
+    /// An event the app cannot read stops the run.
+    func stopUnreadable() {
+        let process = lock.withLock { () -> AgentioProcess? in unreadable = true; return self.process }
+        process?.stop()
+    }
+
+    func answer(id: String, value: String) {
+        lock.withLock { process }?.send(jsonLine(["id": id, "value": value]))
+    }
+
+    func cancel() {
+        let process = lock.withLock { () -> AgentioProcess? in cancelled = true; return self.process }
+        process?.stop()
+    }
+
+    func finished() async throws -> String {
+        guard let process = lock.withLock({ self.process }) else { throw AgentioError("Adding the profile did not start") }
+        // OAuth waits up to 5 minutes and device codes up to 10; this only guards a hang.
+        let exit = await process.finished(timeout: .seconds(20 * 60))
+        if let formatError = process.formatError { throw formatError }
+        let (cancelled, unreadable) = lock.withLock { (self.cancelled, self.unreadable) }
+        if cancelled { throw AgentioError("Adding the profile was cancelled", exitCode: exit.exitCode) }
+        if unreadable { throw unreadableSetup }
+        let result = AgentioResult(exitCode: exit.exitCode, stdout: exit.stdout, stderr: exit.stderr, events: process.events)
+        guard exit.exitCode == 0, let profile = process.events.last(where: { $0.name == "added" })?.string("profile") else {
+            throw failure(result, fallback: "Adding the profile failed")
+        }
+        return profile
+    }
+}
+
+extension AgentioCLI {
+    /// `profile add --describe --json`. Nil when this agentio cannot set the service up that way:
+    /// it says so, or it predates `--describe`.
+    public func describeSetup(_ service: String) async throws -> SetupNeeds? {
+        guard isServiceID(service) else { throw invalidService(service) }
+        let result = try await execute([service, "profile", "add", "--describe", "--json"], timeout: .seconds(30))
+        if result.exitCode == 0, let event = result.events.last(where: { $0.name == "needs" }) {
+            guard let needs = SetupNeeds(event: event) else { throw unreadableSetup }
+            return needs
+        }
+        if result.events.last(where: \.isFailure)?.string("message")?.hasSuffix("cannot be set up with --json yet") == true { return nil }
+        if result.events.isEmpty, result.stderr.contains("unknown option '--describe'") { return nil }
+        throw failure(result, fallback: "agentio could not describe the \(service) setup")
+    }
+
+    /// `profile add --json --input -`: `values` on stdin, kept open for answers; each step to `onEvent`.
+    public func startProfileAdd(_ service: String, values: [String: String], readOnly: Bool,
+                                onEvent: @escaping @Sendable (SetupEvent) -> Void) throws -> any ProfileAddRunning {
+        guard isServiceID(service) else { throw invalidService(service) }
+        let run = ProfileAddRun()
+        let arguments = [service, "profile", "add", "--json", "--input", "-"] + (readOnly ? ["--read-only"] : [])
+        let process = try start(arguments, input: jsonLine(values), keepsInputOpen: true) { event in
+            do {
+                if let step = try setupEvent(event) { onEvent(step) }
+            } catch {
+                run.stopUnreadable()
+            }
+        }
+        run.attach(process)
+        return run
+    }
+}
