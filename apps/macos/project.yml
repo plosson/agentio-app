@@ -13,6 +13,11 @@ settings:
     CODE_SIGN_IDENTITY: "-"
     CODE_SIGN_STYLE: Manual
     ENABLE_USER_SCRIPT_SANDBOXING: YES
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    # 1.19.0 and later run a build plugin that Xcode must be told to trust; 1.18.0 has none.
+    exactVersion: "1.18.0"
 targets:
   AgentioCompanion:
     type: application
@@ -53,6 +58,7 @@ targets:
     sources: [CompanionUI]
     dependencies:
       - target: AgentioKit
+      - package: SwiftTerm
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.plosson.agentio-companion.CompanionUI

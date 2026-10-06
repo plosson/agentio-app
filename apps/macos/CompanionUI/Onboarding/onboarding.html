@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>AgentIO</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --window: #ffffff; --pane: #f5f5f7; --group: #ffffff; --hover: rgba(0,0,0,.05);
+  --line: rgba(0,0,0,.1); --fg: #1d1d1f; --muted: #6e6e73; --accent: #007aff; --accent-soft: rgba(0,122,255,.1);
+  --on-accent: #fff; --ok: #248a3d; --ok-soft: rgba(52,199,89,.14); --bad: #d70015; --bad-soft: rgba(255,59,48,.1);
+  --warn: #c93400; --code-bg: #f2f2f5; --shadow: 0 .5px 1.5px rgba(0,0,0,.18);
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --window: #1e1e1e; --pane: #232325; --group: #2c2c2e; --hover: rgba(255,255,255,.06);
+  --line: rgba(255,255,255,.1); --fg: #f5f5f7; --muted: #98989d; --accent: #0a84ff; --accent-soft: rgba(10,132,255,.16);
+  --ok: #30d158; --ok-soft: rgba(48,209,88,.15); --bad: #ff453a; --bad-soft: rgba(255,69,58,.14); --warn: #ff9f0a;
+  --code-bg: #1c1c1e; --shadow: 0 .5px 1.5px rgba(0,0,0,.6);
+}}
+:root[data-theme="dark"] {
+  --window: #1e1e1e; --pane: #232325; --group: #2c2c2e; --hover: rgba(255,255,255,.06);
+  --line: rgba(255,255,255,.1); --fg: #f5f5f7; --muted: #98989d; --accent: #0a84ff; --accent-soft: rgba(10,132,255,.16);
+  --ok: #30d158; --ok-soft: rgba(48,209,88,.15); --bad: #ff453a; --bad-soft: rgba(255,69,58,.14); --warn: #ff9f0a;
+  --code-bg: #1c1c1e; --shadow: 0 .5px 1.5px rgba(0,0,0,.6);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--window); }
+body { color: var(--fg); font: 13px/1.45 var(--font); -webkit-font-smoothing: antialiased; -webkit-user-select: none; user-select: none; }
+input { -webkit-user-select: text; user-select: text; }
+pre.log { -webkit-user-select: text; user-select: text; }
+button { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 1px; border-radius: 6px; }
+
+/* ---------- The window: the page fills it; the window's own traffic lights sit in the top 28 px ---------- */
+.win { width: 100%; height: 100%; background: var(--window); overflow: hidden; position: relative; display: flex; flex-direction: column; }
+.stage { flex: 1; position: relative; }
+.screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 48px 56px 64px; text-align: center; opacity: 0; transform: translateX(24px); pointer-events: none;
+  transition: opacity .35s ease, transform .35s ease; }
+.screen.on { opacity: 1; transform: none; pointer-events: auto; }
+.screen.left { transform: translateX(-24px); }
+h1 { font-size: 24px; font-weight: 700; margin: 16px 0 6px; letter-spacing: -.01em; }
+.lead { color: var(--muted); font-size: 14px; max-width: 420px; margin: 0 auto 22px; }
+.small { font-size: 11.5px; color: var(--muted); }
+
+.button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 18px; border-radius: 8px;
+  border: .5px solid var(--line); background: var(--group); box-shadow: var(--shadow); cursor: pointer; font-weight: 500; white-space: nowrap; }
+.button:hover { filter: brightness(.97); }
+.button.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.button.big { height: 38px; padding: 0 26px; font-size: 14px; border-radius: 10px; }
+.button:disabled { opacity: .45; cursor: default; filter: none; }
+.button .spinner { border-color: color-mix(in srgb, currentColor 30%, transparent); border-top-color: currentColor; }
+.link { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 4px; font-weight: 500; }
+.actions { display: flex; gap: 10px; justify-content: center; align-items: center; margin-top: 22px; }
+.back { position: absolute; top: 40px; left: 18px; background: none; border: 0; color: var(--muted); cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 6px; }
+.back:hover { background: var(--hover); color: var(--fg); }
+
+/* ---------- The vault icon, with a dial that can turn ---------- */
+.vault { width: 112px; height: 112px; position: relative; flex: none; }
+.vault svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 10px 18px rgba(47,95,216,.28)); }
+.vault .dial, .vault .knob { transform-origin: 118px 128px; transform-box: view-box; }
+.vault.float { animation: float 4s ease-in-out infinite; }
+.vault.turning .dial { animation: turn 2.4s cubic-bezier(.45,0,.55,1) infinite; }
+.vault.open .dial { animation: unlock .9s cubic-bezier(.3,1.4,.5,1) forwards; }
+.vault.open svg { animation: pop .6s .5s cubic-bezier(.3,1.5,.5,1) both; }
+@keyframes float { 50% { transform: translateY(-6px); } }
+@keyframes turn { 0% { transform: rotate(0); } 35% { transform: rotate(140deg); } 55% { transform: rotate(110deg); } 100% { transform: rotate(360deg); } }
+@keyframes unlock { to { transform: rotate(-270deg); } }
+@keyframes pop { 50% { transform: scale(1.08); } }
+
+/* A ring around the vault for progress */
+.ringwrap { position: relative; width: 168px; height: 168px; display: grid; place-items: center; }
+.ringwrap svg.ring { position: absolute; inset: 0; transform: rotate(-90deg); }
+.ring circle { fill: none; stroke-width: 6; }
+.ring .track { stroke: var(--line); }
+.ring .fill { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset .3s ease; }
+.ringwrap.done .fill { stroke: var(--ok); }
+
+/* ---------- Welcome: two choices ---------- */
+.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; max-width: 500px; }
+.choice { text-align: left; padding: 16px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--group); cursor: pointer;
+  display: flex; flex-direction: column; gap: 6px; transition: border-color .15s, background .15s, transform .15s; }
+.choice:hover { transform: translateY(-1px); }
+.choice .ico { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.choice .ico svg { width: 20px; height: 20px; }
+.choice b { font-size: 14px; }
+.choice span { color: var(--muted); font-size: 12px; }
+.choice[aria-checked="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--group)); }
+
+/* ---------- Background download pill ---------- */
+.pill { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px;
+  padding: 5px 12px 5px 6px; border-radius: 999px; background: var(--pane); border: .5px solid var(--line); font-size: 11.5px; color: var(--muted);
+  transition: opacity .3s; z-index: 4; white-space: nowrap; }
+.pill.hide { opacity: 0; pointer-events: none; }
+.pill svg { width: 18px; height: 18px; transform: rotate(-90deg); }
+.pill circle { fill: none; stroke-width: 3; }
+.pill .track { stroke: var(--line); } .pill .fill { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset .3s; }
+.pill.done .fill { stroke: var(--ok); }
+.pill .tick { display: none; color: var(--ok); }
+.pill.done .tick { display: inline; }
+.pill.failed { color: var(--bad); padding-left: 12px; }
+.pill.failed svg { display: none; }
+
+/* ---------- Forms ---------- */
+.field { width: 100%; max-width: 380px; text-align: left; }
+.field label { display: block; font-weight: 600; margin: 0 0 6px 2px; }
+.input { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border-radius: 9px; background: var(--group);
+  border: .5px solid var(--line); box-shadow: inset 0 .5px 1px rgba(0,0,0,.06); }
+.input:focus-within { outline: 3px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+.input input { flex: 1; border: 0; outline: 0; background: none; font: 14px var(--font); color: var(--fg); min-width: 0; }
+.input .pre { color: var(--muted); font-size: 14px; }
+.input button { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 12px; }
+.check { min-height: 22px; margin: 8px 2px 0; font-size: 12px; display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.check.ok { color: var(--ok); } .check.bad { color: var(--bad); }
+.spinner { width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.toggle { display: flex; align-items: center; gap: 8px; margin: 10px 2px 0; color: var(--muted); font-size: 12px; cursor: pointer; }
+.toggle input { accent-color: var(--accent); }
+
+.meter { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 8px 2px 0; }
+.meter i { height: 4px; border-radius: 2px; background: var(--line); transition: background .2s; }
+.note { display: flex; gap: 10px; text-align: left; max-width: 380px; margin: 16px auto 0; padding: 10px 12px; border-radius: 10px;
+  background: var(--pane); border: .5px solid var(--line); font-size: 12px; color: var(--muted); }
+.note svg { width: 18px; height: 18px; flex: none; color: var(--warn); margin-top: 1px; }
+
+/* ---------- Getting ready ---------- */
+.steps { list-style: none; padding: 0; margin: 18px 0 0; text-align: left; display: grid; gap: 8px; }
+.steps li { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+.steps li .dot { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--line); display: grid; place-items: center; flex: none; }
+.steps li.now { color: var(--fg); font-weight: 500; }
+.steps li.now .dot { border-color: var(--accent); }
+.steps li.now .dot::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.steps li.done { color: var(--fg); }
+.steps li.done .dot { background: var(--ok); border-color: var(--ok); color: #fff; }
+.steps li.done .dot::after { content: "✓"; font-size: 11px; font-weight: 700; }
+@keyframes pulse { 50% { transform: scale(.55); opacity: .5; } }
+.amount { margin-top: 6px; font-variant-numeric: tabular-nums; }
+details { margin-top: 16px; width: 100%; max-width: 420px; text-align: left; }
+summary { cursor: pointer; color: var(--muted); font-size: 12px; text-align: center; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+summary::after { content: " ›"; }
+details[open] summary::after { content: " ⌄"; }
+pre.log { margin: 8px 0 0; padding: 10px; border-radius: 8px; background: var(--code-bg); font: 11px/1.5 var(--mono); color: var(--muted);
+  max-height: 96px; overflow: auto; white-space: pre-wrap; }
+
+/* ---------- Approve this Mac ---------- */
+.pair { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
+.pair .mac, .pair .hub { width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center; background: var(--pane); border: .5px solid var(--line); }
+.pair .mac svg, .pair .hub svg { width: 30px; height: 30px; color: var(--fg); }
+.pair .hub svg { color: var(--accent); }
+.wire { width: 90px; height: 2px; background: repeating-linear-gradient(90deg, var(--accent) 0 6px, transparent 6px 12px); background-size: 24px 2px; animation: flow 1s linear infinite; }
+@keyframes flow { to { background-position: 24px 0; } }
+.code { display: flex; gap: 6px; justify-content: center; margin: 4px 0 6px; }
+.code span { width: 34px; height: 44px; border-radius: 8px; display: grid; place-items: center; font: 600 22px var(--mono); background: var(--group);
+  border: .5px solid var(--line); box-shadow: 0 1.5px 0 var(--line), var(--shadow); }
+.code .gap { width: 10px; background: none; border: 0; box-shadow: none; color: var(--muted); }
+.waiting { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 500; font-size: 12px; margin-top: 14px; }
+.waiting i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.2s ease-in-out infinite; }
+
+/* ---------- Done ---------- */
+.confetti { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.confetti i { position: absolute; top: 34%; left: 50%; width: 7px; height: 11px; border-radius: 2px; opacity: 0; }
+.burst .confetti i { animation: fly 1.3s cubic-bezier(.2,.7,.4,1) forwards; }
+@keyframes fly { 0% { opacity: 1; transform: translate(0,0) rotate(0); } 100% { opacity: 0; transform: translate(var(--x), var(--y)) rotate(var(--r)); } }
+.where { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 10px; background: var(--pane); border: .5px solid var(--line); margin-bottom: 4px; }
+.where::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+
+.banner { width: 100%; max-width: 420px; margin-top: 14px; padding: 10px 12px; border-radius: 10px; background: var(--bad-soft); color: var(--bad); text-align: left; font-size: 12.5px; -webkit-user-select: text; user-select: text; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+@media (max-width: 600px) { .screen { padding: 48px 20px 64px; } .choices { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div class="win">
+  <div class="stage">
+
+    <!-- While the app reads the vault -->
+    <section class="screen" data-screen="loading">
+      <div class="vault float" data-vault></div>
+    </section>
+
+    <!-- Welcome back (an existing vault) -->
+    <section class="screen" data-screen="back">
+      <div class="vault float" data-vault></div>
+      <h1>Welcome back</h1>
+      <p class="lead">Your vault is ready when you are.</p>
+      <div class="where"><span id="backWhere"></span></div>
+      <div class="actions">
+        <button class="button primary big" id="backOpen" data-main><span class="spinner" hidden></span><span class="label">Open my vault</span></button>
+      </div>
+      <button class="link" id="backOther" style="margin-top:8px">Use a different hub</button>
+      <div class="banner" role="alert" hidden></div>
+    </section>
+
+    <!-- Welcome -->
+    <section class="screen" data-screen="welcome">
+      <div class="vault float" data-vault></div>
+      <h1>Welcome to AgentIO</h1>
+      <p class="lead">One safe place for the accounts your AI agents use: Gmail, Calendar, GitHub and more. Where should it live?</p>
+      <div class="choices" role="radiogroup" aria-label="Where your vault lives">
+        <button class="choice" role="radio" aria-checked="false" data-choice="hub">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></div>
+          <b>Connect to a hub</b>
+          <span>Use the vault you or your team already run. Every Mac and server shares it.</span>
+        </button>
+        <button class="choice" role="radio" aria-checked="false" data-choice="local">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div>
+          <b>Keep it on this Mac</b>
+          <span>A private vault, locked with a passphrase you choose. Good for trying it out.</span>
+        </button>
+      </div>
+      <div class="actions"><button class="button primary big" id="welcomeNext" data-main disabled><span class="spinner" hidden></span><span class="label">Continue</span></button></div>
+      <div class="banner" role="alert" hidden></div>
+    </section>
+
+    <!-- Hub address -->
+    <section class="screen" data-screen="hub">
+      <button class="back" id="hubBack">‹ Back</button>
+      <div class="vault" data-vault style="width:72px;height:72px"></div>
+      <h1>Where is your hub?</h1>
+      <p class="lead">The address of the AgentIO hub you use. Ask whoever runs it if you’re not sure.</p>
+      <div class="field">
+        <div class="input"><span class="pre">https://</span><input id="hubInput" placeholder="agentio.example.com" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Hub address"></div>
+        <div class="check" id="hubCheck" aria-live="polite"><span class="spinner" hidden></span><span class="msg"></span><b></b></div>
+        <label class="toggle"><input type="checkbox" id="hubRemember" checked> Remember this address</label>
+      </div>
+      <div class="actions"><button class="button primary big" id="hubNext" data-main disabled><span class="spinner" hidden></span><span class="label">Connect</span></button></div>
+      <div class="banner" role="alert" hidden></div>
+      <p class="small" style="margin-top:14px">No hub yet? <a class="link" id="website" href="#">Get a hosted one at agentio.com</a></p>
+    </section>
+
+    <!-- Passphrase -->
+    <section class="screen" data-screen="local">
+      <button class="back" id="localBack">‹ Back</button>
+      <div class="vault" data-vault style="width:72px;height:72px"></div>
+      <h1>Choose a passphrase</h1>
+      <p class="lead">It locks your vault. You’ll type it when you open the vault.</p>
+      <div class="field">
+        <div class="input"><input id="pass1" type="password" placeholder="At least 8 characters" aria-label="Passphrase"><button data-show="pass1">Show</button></div>
+        <div class="meter" id="meter"><i></i><i></i><i></i><i></i></div>
+        <div class="check" id="passHint">Tip: a few unrelated words are easy to remember and hard to guess.</div>
+        <div class="input" style="margin-top:6px"><input id="pass2" type="password" placeholder="Type it again" aria-label="Passphrase again"><button data-show="pass2">Show</button></div>
+        <div class="check" id="matchHint"></div>
+      </div>
+      <div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+        <span>Keep it somewhere safe, like your password manager. Nobody can recover it for you, not even us.</span></div>
+      <div class="actions"><button class="button primary big" id="localNext" data-main disabled><span class="spinner" hidden></span><span class="label">Create my vault</span></button></div>
+      <div class="banner" role="alert" hidden></div>
+    </section>
+
+    <!-- Getting ready -->
+    <section class="screen" data-screen="ready">
+      <div class="ringwrap" id="readyRing">
+        <svg class="ring" viewBox="0 0 168 168"><circle class="track" cx="84" cy="84" r="78"/><circle class="fill" cx="84" cy="84" r="78"/></svg>
+        <div class="vault turning" id="readyVault" data-vault></div>
+      </div>
+      <h1 id="readyTitle">Getting AgentIO ready</h1>
+      <p class="lead" id="readyLead" style="margin-bottom:0">This happens once. It takes about a minute.</p>
+      <ul class="steps" id="steps">
+        <li data-step="0"><span class="dot"></span>Downloading AgentIO <span class="small amount" id="amount"></span></li>
+        <li data-step="1"><span class="dot"></span>Setting it up on this Mac</li>
+        <li data-step="2"><span class="dot"></span>Checking that it works</li>
+      </ul>
+      <details><summary>Show details</summary><pre class="log" id="readyLog"></pre></details>
+      <div class="banner" role="alert" hidden></div>
+    </section>
+
+    <!-- Download failed -->
+    <section class="screen" data-screen="failed">
+      <div class="vault" data-vault style="width:72px;height:72px;filter:grayscale(.6)"></div>
+      <h1>We couldn’t get AgentIO</h1>
+      <p class="lead">The download stopped before it finished. Check that this Mac is online, then try again.</p>
+      <div class="actions">
+        <button class="button primary big" id="retry" data-main><span class="spinner" hidden></span><span class="label">Try again</span></button>
+        <button class="button big" id="failedBack">Back</button>
+      </div>
+      <div class="banner" role="alert" hidden></div>
+      <details><summary>Show details</summary><pre class="log" id="failedLog"></pre></details>
+    </section>
+
+    <!-- Approve this Mac -->
+    <section class="screen" data-screen="approve">
+      <button class="back" id="cancel">‹ Cancel</button>
+      <div class="pair">
+        <div class="mac"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div>
+        <div class="wire"></div>
+        <div class="hub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></div>
+      </div>
+      <h1>Approve this Mac</h1>
+      <p class="lead">For your safety, the hub checks that it’s really you. Check that it shows this code:</p>
+      <div class="code" id="code"></div>
+      <div class="waiting"><i></i><span id="waitText">Waiting for approval…</span></div>
+      <div class="actions">
+        <button class="button primary big" id="approveNow" data-main disabled><span class="spinner" hidden></span><span class="label">I run this hub: approve it</span></button>
+        <button class="button big" id="copyLink" disabled>Copy link for the owner</button>
+      </div>
+      <p class="small" id="copied" style="min-height:18px;margin-top:8px"></p>
+      <div class="banner" role="alert" hidden></div>
+    </section>
+
+    <!-- All set -->
+    <section class="screen" data-screen="done">
+      <div class="confetti" id="confetti"></div>
+      <div class="vault" data-vault id="doneVault"></div>
+      <h1 id="doneTitle">You’re all set!</h1>
+      <p class="lead" id="doneLead">This Mac is connected to your hub. Next, add the accounts your agents can use.</p>
+      <div class="where" id="doneWhere"><span></span></div>
+      <div class="actions"><button class="button primary big" id="doneOpen" data-main><span class="spinner" hidden></span><span class="label">Open my vault</span></button></div>
+      <div class="banner" role="alert" hidden></div>
+    </section>
+
+    <!-- The download, running in the background from the first screen -->
+    <div class="pill hide" id="pill" title="AgentIO is downloading in the background">
+      <svg viewBox="0 0 18 18"><circle class="track" cx="9" cy="9" r="7"/><circle class="fill" cx="9" cy="9" r="7"/></svg>
+      <span id="pillText"></span><span class="tick">✓</span>
+    </div>
+  </div>
+</div>
+
+<template id="vaultSvg">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">
+<defs>
+<linearGradient id="vb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4876EC"/><stop offset="1" stop-color="#2F5FD8"/></linearGradient>
+<linearGradient id="vbody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFF9EC"/><stop offset="1" stop-color="#EEE2CA"/></linearGradient>
+<linearGradient id="vdark" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1F2526"/><stop offset="1" stop-color="#343C3D"/></linearGradient>
+<radialGradient id="vknob" cx="0.4" cy="0.35" r="0.7"><stop offset="0" stop-color="#4876EC"/><stop offset="1" stop-color="#2F5FD8"/></radialGradient>
+</defs>
+<rect width="256" height="256" rx="57" fill="url(#vb)"/>
+<rect x="28" y="80" width="18" height="34" rx="7" fill="#283030"/>
+<rect x="28" y="146" width="18" height="34" rx="7" fill="#283030"/>
+<rect x="36" y="42" width="186" height="172" rx="38" fill="url(#vbody)"/>
+<rect x="52" y="58" width="154" height="140" rx="26" fill="none" stroke="#E2D3B6" stroke-width="3"/>
+<g class="dial"><circle cx="118" cy="128" r="46" fill="url(#vdark)"/>TICKS</g>
+<circle class="knob" cx="118" cy="128" r="17" fill="url(#vknob)"/>
+<rect x="176" y="94" width="20" height="68" rx="10" fill="#283030"/>
+</svg>
+</template>
+
+<script>
+'use strict';
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const send = (action, ...args) => window.webkit?.messageHandlers?.agentioOnboarding?.postMessage({ action, args });
+  /** Sets text only when it changed, and only as text. */
+  const text = (el, value) => { if (el.textContent !== value) el.textContent = value; };
+
+  // ---------- The vault icon everywhere (static markup, no state in it) ----------
+  const ticks = Array.from({ length: 12 }, (_, i) => `<rect x="116" y="88" width="4" height="10" rx="2" fill="#F2C14E" transform="rotate(${i * 30} 118 128)"/>`).join('');
+  const vaultSvg = $('vaultSvg').innerHTML.replace('TICKS', ticks);
+  document.querySelectorAll('[data-vault]').forEach((el) => { el.innerHTML = vaultSvg; });
+
+  // ---------- What the page holds: the last state, and what the user types ----------
+  let last = null;
+  let current = null;
+  let choice = null;
+  const order = ['loading', 'back', 'welcome', 'hub', 'local', 'ready', 'failed', 'approve', 'done'];
+  const screens = new Map([...document.querySelectorAll('.screen')].map((s) => [s.dataset.screen, s]));
+
+  // ---------- Buttons: the main one of each screen shows `busy` ----------
+  const mains = [...document.querySelectorAll('[data-main]')];
+  mains.forEach((b) => { b.dataset.label = b.querySelector('.label').textContent; });
+
+  /** A hub address as typed, for comparing with the checked one. Only https:// is implied;
+      an http:// (a local test hub, debug builds) stays part of the address. */
+  const bare = (s) => String(s || '').trim().replace(/^https:\/\//i, '').replace(/\/+$/, '').toLowerCase();
+
+  function refreshButtons() {
+    const s = last || {};
+    const busy = typeof s.busy === 'string' && s.busy ? s.busy : null;
+    const check = s.hubCheck || {};
+    const hubOK = check.state === 'found' && typeof check.hub === 'string' && check.hub !== '' && bare(check.hub) === bare($('hubInput').value);
+    const passOK = $('pass1').value.length >= 8 && $('pass1').value === $('pass2').value;
+    const hasCode = typeof s.code === 'string' && s.code !== '';
+    const allowed = { welcomeNext: choice !== null, hubNext: hubOK, localNext: passOK, approveNow: hasCode };
+    for (const b of mains) {
+      const isBusy = busy !== null && b.closest('.screen') === screens.get(current);
+      const off = isBusy || allowed[b.id] === false;
+      if (b.disabled !== off) b.disabled = off;
+      b.querySelector('.spinner').hidden = !isBusy;
+      text(b.querySelector('.label'), isBusy ? busy : b.dataset.label);
+    }
+    if ($('copyLink').disabled === hasCode) $('copyLink').disabled = !hasCode;
+  }
+
+  // ---------- Screens ----------
+  function show(name) {
+    const from = order.indexOf(current), to = order.indexOf(name);
+    screens.forEach((s, key) => {
+      const on = key === name;
+      s.classList.toggle('on', on);
+      s.inert = !on;
+      s.classList.toggle('left', !on && to > from && key === current);
+    });
+    if (current === 'local') clearPassphrases();
+    current = name;
+    if (name === 'hub') enterHub();
+    if (name === 'local') $('pass1').focus({ preventScroll: true });
+    if (name === 'ready') {
+      const v = $('readyVault');
+      v.classList.remove('open'); v.classList.add('turning');
+    }
+    if (name === 'done') celebrate();
+  }
+
+  // ---------- Welcome ----------
+  document.querySelectorAll('[data-choice]').forEach((b) => b.addEventListener('click', () => {
+    choice = b.dataset.choice;
+    document.querySelectorAll('[data-choice]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+    refreshButtons();
+  }));
+  $('welcomeNext').addEventListener('click', () => {
+    if (choice === 'hub') send('chooseHub');
+    if (choice === 'local') send('chooseLocal');
+  });
+
+  // ---------- Welcome back ----------
+  $('backOpen').addEventListener('click', () => send('openExistingVault'));
+  $('backOther').addEventListener('click', () => send('useAnotherVault'));
+
+  // ---------- Hub address, checked as you type ----------
+  const hubInput = $('hubInput');
+  let hubTimer;
+  function enterHub() {
+    const s = last;
+    $('hubRemember').checked = s.rememberAddress !== false;
+    if (!hubInput.value && typeof s.hubAddress === 'string' && s.hubAddress) hubInput.value = s.hubAddress;
+    // Prefilled or kept from an earlier visit: check it again (the model's check starts idle).
+    clearTimeout(hubTimer);
+    if (hubInput.value.trim()) send('checkHub', hubInput.value.trim());
+    hubInput.focus({ preventScroll: true });
+  }
+  hubInput.addEventListener('input', () => {
+    const stripped = hubInput.value.replace(/^\s*https:\/\//i, '');
+    if (stripped !== hubInput.value) hubInput.value = stripped;
+    refreshButtons();
+    clearTimeout(hubTimer);
+    hubTimer = setTimeout(() => send('checkHub', hubInput.value.trim()), 500);
+  });
+  hubInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !$('hubNext').disabled) $('hubNext').click(); });
+  $('hubNext').addEventListener('click', () => send('signIn', hubInput.value.trim(), $('hubRemember').checked === true));
+  $('hubBack').addEventListener('click', () => send('back'));
+  $('website').addEventListener('click', (e) => { e.preventDefault(); send('openWebsite'); });
+
+  let lastCheck = null;
+  function paintHubCheck(check) {
+    const key = JSON.stringify([check.state, check.hub, check.version]);
+    if (key === lastCheck) return;
+    lastCheck = key;
+    const line = $('hubCheck');
+    const hub = typeof check.hub === 'string' ? check.hub : '';
+    const version = typeof check.version === 'string' ? check.version : '';
+    let cls = 'check', spin = false, msg = '', bold = '';
+    switch (check.state) {
+      case 'checking': spin = true; msg = 'Looking for your hub…'; break;
+      case 'found': cls = 'check ok'; msg = '✓ Found it: '; bold = hub; break;
+      case 'invalid': cls = 'check bad'; msg = 'That doesn’t look like a web address yet.'; break;
+      case 'unreachable': cls = 'check bad'; msg = `No AgentIO hub answers at ${hub}. Check the address?`; break;
+      case 'tooOld': cls = 'check bad'; msg = `This hub runs AgentIO ${version}. It needs 3.14 or later for this app.`; break;
+    }
+    line.className = cls;
+    line.querySelector('.spinner').hidden = !spin;
+    text(line.querySelector('.msg'), msg);
+    text(line.querySelector('b'), bold);
+  }
+
+  // ---------- Passphrase ----------
+  const pass1 = $('pass1'), pass2 = $('pass2');
+  function strength(p) {
+    let s = 0;
+    if (p.length >= 8) s++;
+    if (p.length >= 12) s++;
+    if (/\s|[-_.]/.test(p) || (/[a-z]/i.test(p) && /\d/.test(p))) s++;
+    if (p.length >= 16) s++;
+    return s;
+  }
+  function checkPass() {
+    const s = strength(pass1.value);
+    const colors = ['var(--bad)', 'var(--warn)', 'var(--ok)', 'var(--ok)'];
+    document.querySelectorAll('#meter i').forEach((i, n) => { i.style.background = n < s ? colors[Math.max(0, s - 1)] : ''; });
+    const hint = $('passHint');
+    if (!pass1.value) { hint.className = 'check'; text(hint, 'Tip: a few unrelated words are easy to remember and hard to guess.'); }
+    else if (pass1.value.length < 8) { const n = 8 - pass1.value.length; hint.className = 'check'; text(hint, `${n} more character${n === 1 ? '' : 's'} to go`); }
+    else { hint.className = 'check ok'; text(hint, ['Long enough', 'Good', 'Strong', 'Very strong'][s - 1] || 'Long enough'); }
+    const match = $('matchHint');
+    if (!pass2.value) { match.className = 'check'; text(match, ''); }
+    else if (pass2.value === pass1.value) { match.className = 'check ok'; text(match, '✓ They match'); }
+    else { match.className = 'check bad'; text(match, pass1.value.startsWith(pass2.value) ? '' : 'They don’t match yet'); }
+    refreshButtons();
+  }
+  function clearPassphrases() {
+    pass1.value = pass2.value = '';
+    checkPass();
+  }
+  pass1.addEventListener('input', checkPass);
+  pass2.addEventListener('input', checkPass);
+  pass2.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !$('localNext').disabled) $('localNext').click(); });
+  document.querySelectorAll('[data-show]').forEach((b) => b.addEventListener('click', () => {
+    const i = $(b.dataset.show);
+    i.type = i.type === 'password' ? 'text' : 'password';
+    text(b, i.type === 'password' ? 'Show' : 'Hide');
+  }));
+  $('localNext').addEventListener('click', () => {
+    send('createVault', pass1.value, pass2.value);
+    clearPassphrases();
+  });
+  $('localBack').addEventListener('click', () => send('back'));
+
+  // ---------- The download: ready screen, failed screen and pill ----------
+  const RING = 2 * Math.PI * 78, PILL = 2 * Math.PI * 7;
+  const ringFill = document.querySelector('#readyRing .fill');
+  const pill = $('pill'), pillFill = pill.querySelector('.fill');
+  ringFill.style.strokeDasharray = RING; pillFill.style.strokeDasharray = PILL;
+  const stepOf = { downloading: 0, settingUp: 1, checking: 2, ready: 3 };
+
+  let lastLog = null;
+  function paintLog(lines) {
+    const key = JSON.stringify(lines);
+    if (key === lastLog) return;
+    lastLog = key;
+    for (const pre of [$('readyLog'), $('failedLog')]) {
+      pre.replaceChildren(...lines.map((line, i) => document.createTextNode(i < lines.length - 1 ? `${line}\n` : line)));
+      pre.scrollTop = pre.scrollHeight;
+    }
+  }
+
+  function paintDownload(d) {
+    const phase = typeof d.phase === 'string' ? d.phase : 'idle';
+    const raw = Number(d.percent);
+    const percent = Number.isFinite(raw) ? Math.min(100, Math.max(0, raw)) : 0;
+    const offset = (n) => String(n * (1 - percent / 100));
+    if (ringFill.style.strokeDashoffset !== offset(RING)) ringFill.style.strokeDashoffset = offset(RING);
+    if (pillFill.style.strokeDashoffset !== offset(PILL)) pillFill.style.strokeDashoffset = offset(PILL);
+
+    const ready = phase === 'ready';
+    const step = phase in stepOf ? stepOf[phase] : -1;
+    document.querySelectorAll('#steps li').forEach((li) => {
+      const i = Number(li.dataset.step);
+      const cls = i < step ? 'done' : i === step ? 'now' : '';
+      if (li.className !== cls) li.className = cls;
+    });
+    text($('amount'), phase === 'downloading' ? `${percent}%` : '');
+    $('readyRing').classList.toggle('done', ready);
+    const v = $('readyVault');
+    v.classList.toggle('turning', !ready);
+    v.classList.toggle('open', ready);
+    text($('readyTitle'), ready ? 'Ready!' : 'Getting AgentIO ready');
+    text($('readyLead'), ready ? '' : 'This happens once. It takes about a minute.');
+    paintLog(Array.isArray(d.log) ? d.log.map(String) : []);
+
+    const showPill = ['welcome', 'hub', 'local'].includes(current) && phase !== 'idle';
+    pill.classList.toggle('hide', !showPill);
+    pill.classList.toggle('done', ready);
+    pill.classList.toggle('failed', phase === 'failed');
+    text($('pillText'), phase === 'failed' ? 'Couldn’t get AgentIO. It will try again when you continue.'
+      : ready ? 'AgentIO is ready' : `Getting AgentIO ready… ${percent}%`);
+  }
+  $('retry').addEventListener('click', () => send('retryDownload'));
+  $('failedBack').addEventListener('click', () => send('back'));
+
+  // ---------- Approve this Mac ----------
+  let lastCode;
+  function paintCode(code) {
+    if (code === lastCode) return;
+    lastCode = code;
+    const box = $('code');
+    const chars = code === null ? ['', '', '', '', '-', '', '', '', ''] : [...code];
+    box.replaceChildren(...chars.map((c) => {
+      const span = document.createElement('span');
+      if (c === '-') { span.className = 'gap'; span.textContent = '–'; } else { span.textContent = c; }
+      return span;
+    }));
+    box.setAttribute('aria-label', code === null ? 'Code' : `Code ${[...code].filter((c) => c !== '-').join(' ')}`);
+    text($('waitText'), code === null ? 'Asking the hub for a code…' : 'Waiting for approval…');
+  }
+  $('approveNow').addEventListener('click', () => send('openApproval'));
+  $('copyLink').addEventListener('click', () => send('copyApprovalLink'));
+  $('cancel').addEventListener('click', () => send('cancelSignIn'));
+
+  // ---------- All set ----------
+  function celebrate() {
+    const c = $('confetti');
+    c.dataset.runs = String(Number(c.dataset.runs || 0) + 1);
+    const v = $('doneVault');
+    v.classList.remove('open'); void v.offsetWidth; v.classList.add('open');
+    const colors = ['#007aff', '#34c759', '#ff9500', '#f2c14e', '#af52de', '#ff2d55'];
+    c.replaceChildren(...Array.from({ length: 36 }, (_, i) => {
+      const a = (i / 36) * Math.PI * 2, d = 140 + Math.random() * 120;
+      const piece = document.createElement('i');
+      piece.style.background = colors[i % colors.length];
+      piece.style.setProperty('--x', `${Math.cos(a) * d}px`);
+      piece.style.setProperty('--y', `${Math.sin(a) * d + 60}px`);
+      piece.style.setProperty('--r', `${Math.random() * 720 - 360}deg`);
+      piece.style.animationDelay = `${0.4 + Math.random() * 0.15}s`;
+      return piece;
+    }));
+    const s = screens.get('done');
+    s.classList.remove('burst'); void s.offsetWidth; s.classList.add('burst');
+  }
+  function paintDone(finished) {
+    const local = finished && finished.kind === 'local';
+    text($('doneTitle'), local ? 'Your vault is ready!' : 'You’re all set!');
+    text($('doneLead'), local
+      ? 'It lives on this Mac, locked with your passphrase. Next, add the accounts your agents can use.'
+      : 'This Mac is connected to your hub. Next, add the accounts your agents can use.');
+    const hub = !local && finished && typeof finished.hub === 'string' ? finished.hub : '';
+    $('doneWhere').hidden = hub === '';
+    text($('doneWhere').querySelector('span'), hub);
+  }
+  $('doneOpen').addEventListener('click', () => send('openVault'));
+
+  // ---------- Dragging the window from an empty area ----------
+  document.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (e.target instanceof Element && e.target.closest('button, input, a, label, summary, details, .choice, pre, .banner')) return;
+    send('dragWindow');
+  });
+
+  // ---------- render(state): shows what the state says; cheap and idempotent ----------
+  function render(state) {
+    if (!state || typeof state !== 'object' || !screens.has(state.screen)) return;
+    last = state;
+    if (state.screen !== current) show(state.screen);
+
+    const vault = state.vault && typeof state.vault === 'object' ? state.vault : null;
+    const remote = !vault || vault.kind !== 'local';
+    const where = remote ? (typeof vault?.hub === 'string' ? vault.hub : '') : 'On this Mac';
+    text($('backWhere'), where);
+    const wherePill = $('backWhere').parentElement;
+    if (wherePill.hidden !== (where === '')) wherePill.hidden = where === '';
+    text($('backOther'), remote ? 'Use a different hub' : 'Connect to a hub instead');
+
+    paintHubCheck(state.hubCheck && typeof state.hubCheck === 'object' ? state.hubCheck : {});
+    paintDownload(state.download && typeof state.download === 'object' ? state.download : {});
+    paintCode(typeof state.code === 'string' && state.code !== '' ? state.code : null);
+    text($('copied'), state.copiedLink === true
+      ? 'Link copied. Send it to the hub’s owner; this page continues on its own once they approve.' : '');
+    paintDone(state.finished && typeof state.finished === 'object' ? state.finished : null);
+
+    const error = typeof state.error === 'string' && state.error !== '' ? state.error : '';
+    document.querySelectorAll('.banner').forEach((b) => {
+      text(b, error);
+      if (b.hidden !== (error === '')) b.hidden = error === '';
+    });
+    refreshButtons();
+  }
+
+  window.agentioOnboarding = Object.freeze({ render });
+})();
+</script>
+</body>
+</html>

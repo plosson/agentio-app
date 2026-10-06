@@ -22,9 +22,13 @@ public struct RootView: View {
                     .sheet(item: Binding(get: { model.addFlow }, set: { if $0 == nil { model.closeAddFlow() } })) { flow in
                         AddProfileSheet(flow: flow, close: model.closeAddFlow)
                     }
+                    .sheet(item: Binding(get: { model.terminalFlow }, set: { if $0 == nil { model.closeTerminalFlow() } })) { flow in
+                        TerminalSheet(flow: flow, close: model.closeTerminalFlow)
+                    }
             } else {
-                OnboardingView(model: model)
-                    .frame(minWidth: 480, minHeight: 560)
+                OnboardingWebView(state: onboardingState(of: model), model: model)
+                    .ignoresSafeArea()
+                    .frame(minWidth: 560, minHeight: 620)
             }
         }
         .background(Theme.bg, ignoresSafeAreaEdges: .all)
@@ -49,4 +53,9 @@ public struct VaultCommands: Commands {
                 .disabled(model.screen != .login && model.screen != .approving)
         }
     }
+}
+
+/// Run a model step from a button or menu item.
+@MainActor func perform(_ step: @escaping @MainActor () async -> Void) {
+    Task { await step() }
 }

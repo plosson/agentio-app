@@ -13,8 +13,9 @@ struct AgentioCompanionApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
-        .defaultSize(width: 720, height: 560)
+        .defaultSize(width: 720, height: 640)
         .commands { VaultCommands(model: appDelegate.model) }
+        Settings { SettingsView() }
     }
 }
 
@@ -26,9 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #else
         let allowLocalHTTP = false
         #endif
+        let settings = CompanionSettings()
         return CompanionModel(
-            backend: AgentioCLI(location: .appDefault()),
-            settings: CompanionSettings(),
+            backend: AgentioCLI(location: .appDefault(), dev: settings.devAgentioRepo.map { DevAgentio(repo: $0) }),
+            settings: settings,
             allowLocalHTTP: allowLocalHTTP,
             deviceName: "AgentIO Companion on \(ProcessInfo.processInfo.hostName)"
         )

@@ -92,10 +92,20 @@ public struct AgentioCLI: Sendable {
     /// The app's environment; the CLI gets it without the user's AGENTIO_*
     /// settings and with its own HOME (`cliEnv`).
     public let baseEnvironment: [String: String]
+    /// A checkout that runs instead of the binary in `location`, which then only gives the HOME.
+    public let dev: DevAgentio?
 
-    public init(location: CliLocation, baseEnvironment: [String: String] = ProcessInfo.processInfo.environment) {
+    public init(location: CliLocation, baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
+                dev: DevAgentio? = nil) {
         self.location = location
         self.baseEnvironment = baseEnvironment
+        self.dev = dev
+    }
+
+    /// The program to start, and the arguments to give it before `arguments`.
+    func command(_ arguments: [String]) -> (executable: URL, arguments: [String]) {
+        guard let dev else { return (location.binPath, arguments) }
+        return (dev.bun, [dev.entry.path] + arguments)
     }
 
     /// Start the app's agentio with `arguments`. `onEvent` gets each --json
@@ -110,7 +120,8 @@ public struct AgentioCLI: Sendable {
         stopGrace: Duration = .seconds(5),
         onEvent: @escaping @Sendable (CliEvent) -> Void = { _ in }
     ) throws -> AgentioProcess {
-        let child = ChildProcess(location.binPath, arguments, environment: cliEnv(location, base: baseEnvironment),
+        let command = command(arguments)
+        let child = ChildProcess(command.executable, command.arguments, environment: cliEnv(location, base: baseEnvironment),
                                  input: input, keepsInputOpen: keepsInputOpen, collectsOutput: collectsOutput, keepsStderr: keepsStderr, stopGrace: stopGrace)
         let process = AgentioProcess(child)
         try process.start(onEvent: onEvent)
@@ -140,7 +151,7 @@ public struct AgentioCLI: Sendable {
             return nil
         }
         let version = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        return result.exitCode == 0 && !version.isEmpty ? CliInfo(path: location.binPath, version: version) : nil
+        return result.exitCode == 0 && !version.isEmpty ? CliInfo(path: dev?.entry ?? location.binPath, version: version) : nil
     }
 
     /// `vault status --json`: remote mode names the hub; a local vault that

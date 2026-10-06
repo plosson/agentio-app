@@ -14,8 +14,10 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     private var _installEvents: [InstallProgress] = []
     private var _installResult: Result<CliInfo, AgentioError> = .success(installed)
     private var _installs: [CliVersion] = []
+    private var _installGate = false
     private var _hubVersion: Result<CliVersion, AgentioError> = .success(CliVersion("3.14.0")!)
     private var _hubChecks: [String] = []
+    private var _hubVersionGates: Set<String> = []
     private var _vaultState: Result<VaultState, AgentioError> = .success(.none)
     private var _vaultStateCalls = 0
     private var _loginCode: LoginCode?
@@ -24,6 +26,7 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     private var _loginRight: Bool? = true
     private var _initVault: Result<Void, AgentioError> = .success(())
     private var _passphrases: [String] = []
+    private var _initVaultGate = false
     private var _daemons: [FakeDaemon] = []
     private var _daemonError: AgentioError?
 
@@ -32,16 +35,25 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     private var _startedAdds: [String] = []
     private var _addRuns: [FakeAddRun] = []
     private var _startedReauths: [String] = []
+    private var _terminalAdds: [String] = []
 
     private func locked<T>(_ body: () -> T) -> T { lock.withLock(body) }
 
     var detected: CliInfo? { get { locked { _detected } } set { locked { _detected = newValue } } }
     var installEvents: [InstallProgress] { get { locked { _installEvents } } set { locked { _installEvents = newValue } } }
     var installResult: Result<CliInfo, AgentioError> { get { locked { _installResult } } set { locked { _installResult = newValue } } }
+    /// While true, `installCli` waits after its events (and stops when its task is cancelled).
+    var installGate: Bool { get { locked { _installGate } } set { locked { _installGate = newValue } } }
+    /// Let the held installs finish.
+    func openInstallGate() { installGate = false }
     /// The minimum each install was asked for.
     var installs: [CliVersion] { locked { _installs } }
     var hubVersionResult: Result<CliVersion, AgentioError> { get { locked { _hubVersion } } set { locked { _hubVersion = newValue } } }
     var hubChecks: [String] { locked { _hubChecks } }
+    /// While a hub is in this set, `hubVersion` for it waits (and stops when its task is cancelled).
+    var hubVersionGates: Set<String> { get { locked { _hubVersionGates } } set { locked { _hubVersionGates = newValue } } }
+    /// Let the held version checks for `hub` answer.
+    func openHubVersionGate(_ hub: String) { locked { _ = _hubVersionGates.remove(hub) } }
     var vaultStateResult: Result<VaultState, AgentioError> { get { locked { _vaultState } } set { locked { _vaultState = newValue } } }
     var vaultStateCalls: Int { locked { _vaultStateCalls } }
     var loginCode: LoginCode? { get { locked { _loginCode } } set { locked { _loginCode = newValue } } }
@@ -50,6 +62,8 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     var loginRight: Bool? { get { locked { _loginRight } } set { locked { _loginRight = newValue } } }
     var initVaultResult: Result<Void, AgentioError> { get { locked { _initVault } } set { locked { _initVault = newValue } } }
     var passphrases: [String] { locked { _passphrases } }
+    /// While true, `initVault` waits after recording its passphrase (and stops when its task is cancelled).
+    var initVaultGate: Bool { get { locked { _initVaultGate } } set { locked { _initVaultGate = newValue } } }
     var daemons: [FakeDaemon] { locked { _daemons } }
     var daemonError: AgentioError? { get { locked { _daemonError } } set { locked { _daemonError = newValue } } }
 
@@ -88,12 +102,22 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
         return run
     }
 
+    var terminalAdds: [String] { locked { _terminalAdds } }
+
+    func terminalProfileAdd(_ service: String, readOnly: Bool) throws -> TerminalCommand {
+        locked { _terminalAdds.append("\(service)|\(readOnly)") }
+        guard isServiceID(service) else { throw invalidService(service) }
+        return TerminalCommand(executable: URL(filePath: "/app/bin/agentio"),
+                               arguments: [service, "profile", "add"] + (readOnly ? ["--read-only"] : []), environment: [:])
+    }
+
     func detectCli() async -> CliInfo? { detected }
 
     /// A successful install is what `detectCli` finds afterwards.
     func installCli(atLeast minimum: CliVersion, onProgress: @escaping @Sendable (InstallProgress) -> Void) async throws -> CliInfo {
         locked { _installs.append(minimum) }
         for event in installEvents { onProgress(event) }
+        while installGate { try await Task.sleep(for: .milliseconds(10)) }
         let info = try installResult.get()
         detected = info
         return info
@@ -101,6 +125,7 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
 
     func hubVersion(_ hub: String) async throws -> CliVersion {
         locked { _hubChecks.append(hub) }
+        while hubVersionGates.contains(hub) { try await Task.sleep(for: .milliseconds(10)) }
         return try hubVersionResult.get()
     }
 
@@ -131,6 +156,7 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
 
     func initVault(passphrase: String) async throws {
         locked { _passphrases.append(passphrase) }
+        while initVaultGate { try await Task.sleep(for: .milliseconds(10)) }
         try initVaultResult.get()
     }
 

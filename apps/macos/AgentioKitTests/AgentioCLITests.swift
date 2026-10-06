@@ -288,3 +288,77 @@ struct DetectTests {
         #expect(await AgentioCLI(location: CliLocation(root: dir.url), baseEnvironment: plainEnv).detect() == nil)
     }
 }
+
+struct DevAgentioTests {
+    /// A dev AgentioCLI for a checkout in a folder with a space, whose "bun" records
+    /// its arguments and HOME, and answers as agentio 3.99.0.
+    func devCli(_ dir: TempDir) throws -> AgentioCLI {
+        _ = try dir.write("my repo/src/index.ts", "")
+        let bun = try dir.write("bun", """
+            #!/bin/sh
+            printf '%s\\n' "$@" > "\(dir.url.path)/bun-args"
+            echo "$HOME" > "\(dir.url.path)/bun-home"
+            echo 3.99.0
+            """, executable: true)
+        return AgentioCLI(location: CliLocation(root: dir.url.appending(path: "cli", directoryHint: .isDirectory)),
+                          baseEnvironment: plainEnv,
+                          dev: DevAgentio(repo: dir.url.appending(path: "my repo", directoryHint: .isDirectory), bun: bun))
+    }
+
+    @Test func runsTheCheckoutWithBunInsteadOfTheAppsBinary() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = try devCli(dir)
+        let info = try #require(await cli.detect())
+        #expect(info == CliInfo(path: try #require(cli.dev).entry, version: "3.99.0"))
+        #expect(dir.read("bun-args") == "\(dir.url.path)/my repo/src/index.ts\n--version\n")
+        #expect(dir.read("bun-home") == cli.location.homeDir.path + "\n")
+    }
+
+    @Test func theAppNeverInstallsOverACheckout() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = try devCli(dir)
+        let repo = dir.url.appending(path: "my repo").path
+        await #expect(throws: AgentioError("The dev AgentIO in \(repo) does not run, or is older than 4.0.0. The app does not install over it: fix the checkout, or remove the devAgentioRepo setting.")) {
+            try await cli.install(atLeast: CliVersion("4.0.0")!, fetchScript: { Issue.record("fetched the installer"); return Data() }) { _ in
+                Issue.record("reported install progress")
+            }
+        }
+        #expect(!FileManager.default.fileExists(atPath: cli.location.binDir.path))
+    }
+
+    @Test func aMissingBunOrEntryIsNamedInTheError() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let location = CliLocation(root: dir.url.appending(path: "cli", directoryHint: .isDirectory))
+        let noBun = AgentioCLI(location: location, baseEnvironment: plainEnv,
+                               dev: DevAgentio(repo: dir.url, bun: dir.url.appending(path: "nowhere/bun")))
+        await #expect(throws: AgentioError("bun is not at \(dir.url.path)/nowhere/bun. Install bun, or remove the devAgentioRepo setting.")) {
+            try await noBun.install(atLeast: minimumCliVersion) { _ in }
+        }
+        let bun = try dir.write("bun", "#!/bin/sh\n", executable: true)
+        let noEntry = AgentioCLI(location: location, baseEnvironment: plainEnv, dev: DevAgentio(repo: dir.url, bun: bun))
+        await #expect(throws: AgentioError("\(dir.url.path)/src/index.ts does not exist. Check the devAgentioRepo setting.")) {
+            try await noEntry.install(atLeast: minimumCliVersion) { _ in }
+        }
+    }
+
+    @Test func bunIsTheFirstFileThatCanRun() throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let missing = dir.url.appending(path: "a/bun")
+        let notExecutable = try dir.write("b/bun", "")
+        let folder = dir.url.appending(path: "c/bun", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let executable = try dir.write("d/bun", "#!/bin/sh\n", executable: true)
+        #expect(DevAgentio.findBun(in: [missing, notExecutable, folder, executable]) == executable)
+        // None: the first, so the error says where bun should be.
+        #expect(DevAgentio.findBun(in: [missing, notExecutable, folder]) == missing)
+    }
+
+    @Test func theTerminalRunsTheCheckoutToo() throws {
+        let cli = AgentioCLI(location: CliLocation(root: URL(filePath: "/tmp/x y/cli")), baseEnvironment: plainEnv,
+                             dev: DevAgentio(repo: URL(filePath: "/src/my agentio"), bun: URL(filePath: "/b/bun")))
+        let command = try cli.terminalProfileAdd("gcal", readOnly: true)
+        #expect(command.executable.path == "/b/bun")
+        #expect(command.arguments == ["/src/my agentio/src/index.ts", "gcal", "profile", "add", "--read-only"])
+        #expect(command.environment["HOME"] == "/tmp/x y/cli/home")
+    }
+}
