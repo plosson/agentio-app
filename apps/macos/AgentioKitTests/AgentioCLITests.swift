@@ -261,6 +261,48 @@ struct LoginTests {
     }
 }
 
+struct CheckUpdateTests {
+    @Test func readsTheVersionEventAndAsksWithTheExactArguments() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        let cli = try fakeCli(dir, """
+            echo "$@" > "\(dir.url.path)/args"
+            echo 'Checking…' >&2
+            echo '{"v":1,"event":"version","current":"3.17.0","latest":"3.17.1","updateAvailable":true}'
+            """)
+        #expect(try await cli.checkUpdate() == CliUpdate(current: "3.17.0", latest: "3.17.1", updateAvailable: true))
+        #expect(dir.read("args") == "update --check --json\n")
+    }
+
+    @Test func anIncompleteOrWronglyTypedEventIsNoAnswer() async throws {
+        for line in [
+            #"{"v":1,"event":"version","current":"3.17.0","latest":"3.17.1"}"#,
+            #"{"v":1,"event":"version","current":"3.17.0","latest":"3.17.1","updateAvailable":1}"#,
+            #"{"v":1,"event":"version","current":"3.17.0","latest":"3.17.1","updateAvailable":"true"}"#,
+            #"{"v":1,"event":"version","current":3.17,"latest":"3.17.1","updateAvailable":false}"#,
+            #"{"v":1,"event":"latest","current":"3.17.0","latest":"3.17.1","updateAvailable":false}"#,
+        ] {
+            let dir = try TempDir(); defer { dir.cleanUp() }
+            let cli = try fakeCli(dir, "echo '\(line)'")
+            await #expect(throws: AgentioError("agentio could not check for updates", exitCode: 0), "line: \(line)") {
+                try await cli.checkUpdate()
+            }
+        }
+    }
+
+    @Test func aFailingCheckThrowsItsMessage() async throws {
+        let dir = try TempDir(); defer { dir.cleanUp() }
+        // An older agentio without --json, or no network: the event or stderr explains it.
+        let cli = try fakeCli(dir, """
+            echo '{"v":1,"event":"version","current":"3.17.0","latest":"3.17.1","updateAvailable":true}'
+            echo '{"v":1,"event":"error","code":"NETWORK","message":"GitHub did not answer"}'
+            exit 1
+            """)
+        await #expect(throws: AgentioError("GitHub did not answer", code: "NETWORK", exitCode: 1)) { try await cli.checkUpdate() }
+        let old = try fakeCli(dir, "echo \"error: unknown option '--json'\" >&2; exit 1")
+        await #expect(throws: AgentioError("error: unknown option '--json'", exitCode: 1)) { try await old.checkUpdate() }
+    }
+}
+
 struct DetectTests {
     @Test func aCliThatFailsOrPrintsNothingIsNotInstalled() async throws {
         for script in ["exit 1", "exit 0", "echo '  '"] {

@@ -6,6 +6,7 @@ import Foundation
 public protocol CompanionBackend: Sendable {
     func detectCli() async -> CliInfo?
     func installCli(atLeast minimum: CliVersion, onProgress: @escaping @Sendable (InstallProgress) -> Void) async throws -> CliInfo
+    func checkCliUpdate() async throws -> CliUpdate
     func hubVersion(_ hub: String) async throws -> CliVersion
     func vaultState() async throws -> VaultState
     func login(hub: String, name: String, onCode: @escaping @Sendable (LoginCode) -> Void) async throws -> VaultState
@@ -32,6 +33,8 @@ extension AgentioCLI: CompanionBackend {
     public func installCli(atLeast minimum: CliVersion, onProgress: @escaping @Sendable (InstallProgress) -> Void) async throws -> CliInfo {
         try await install(atLeast: minimum, onProgress: onProgress)
     }
+
+    public func checkCliUpdate() async throws -> CliUpdate { try await checkUpdate() }
 
     public func hubVersion(_ hub: String) async throws -> CliVersion { try await AgentioKit.hubVersion(hub) }
 
