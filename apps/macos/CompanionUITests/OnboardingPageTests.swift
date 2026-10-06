@@ -210,6 +210,60 @@ struct OnboardingPageTests {
         #expect(try await renderAndCollect(state("hub")).isEmpty)
     }
 
+    @Test func comingBackToTheHubChecksTheKeptAddressAgain() async throws {
+        try await render(state("hub"))
+        _ = try await js("document.getElementById('hubInput').value = 'team.example'")
+        try await render(state("welcome"))
+        #expect(try await renderAndCollect(state("hub")) == [.checkHub("team.example")])
+        #expect(try await bool("document.getElementById('hubNext').disabled") == true)
+        try await render(state("hub") { $0.hubCheck = .init(state: "found", hub: "team.example", version: "3.17.0") })
+        #expect(try await sent(by: "document.getElementById('hubNext').click()") == [.signIn(address: "team.example", remember: true)])
+    }
+
+    @Test func onlyAPastedHttpsIsRemoved() async throws {
+        try await render(state("hub"))
+        let type = { (value: String) in
+            "const f = document.getElementById('hubInput'); f.value = '\(value)'; f.dispatchEvent(new Event('input'))"
+        }
+        _ = try await js(type("https://team.example"))
+        #expect(try await string("document.getElementById('hubInput').value") == "team.example")
+        _ = try await js(type("HTTPS://team.example"))
+        #expect(try await string("document.getElementById('hubInput').value") == "team.example")
+        _ = try await js(type("http://127.0.0.1:1234"))
+        #expect(try await string("document.getElementById('hubInput').value") == "http://127.0.0.1:1234")
+    }
+
+    @Test func aLocalHttpHubCanBeReached() async throws {
+        let found = OnboardingState.Check(state: "found", hub: "http://127.0.0.1:1234", version: "3.17.0")
+        try await render(state("hub"))
+        _ = try await js("const f = document.getElementById('hubInput'); f.value = 'http://127.0.0.1:1234'; f.dispatchEvent(new Event('input'))")
+        try await render(state("hub") { $0.hubCheck = found })
+        #expect(try await bool("document.getElementById('hubNext').disabled") == false)
+        #expect(try await sent(by: "document.getElementById('hubNext').click()").filter { $0 != .checkHub("http://127.0.0.1:1234") }
+            == [.signIn(address: "http://127.0.0.1:1234", remember: true)])
+        // The same host without the scheme is another address (https://), so not the one found.
+        _ = try await js("const f = document.getElementById('hubInput'); f.value = '127.0.0.1:1234'; f.dispatchEvent(new Event('input'))")
+        #expect(try await bool("document.getElementById('hubNext').disabled") == true)
+        // And an https hub found does not match a field typed with http://.
+        _ = try await js("const f = document.getElementById('hubInput'); f.value = 'http://team.example'; f.dispatchEvent(new Event('input'))")
+        try await render(state("hub") { $0.hubCheck = .init(state: "found", hub: "team.example", version: "3.17.0") })
+        #expect(try await bool("document.getElementById('hubNext').disabled") == true)
+    }
+
+    @Test func hiddenScreensAreInert() async throws {
+        try await render(state("welcome"))
+        try await render(state("hub"))
+        #expect(try await bool("document.querySelector('[data-screen=welcome]').inert && !document.querySelector('[data-screen=hub]').inert") == true)
+        #expect(try await bool("document.activeElement === document.getElementById('hubInput')") == true)
+    }
+
+    @Test func aRemoteVaultWithoutAHubHidesTheAddress() async throws {
+        try await render(state("back") { $0.vault = .init(kind: "remote") })
+        #expect(try await bool("document.getElementById('backWhere').parentElement.hidden") == true)
+        try await render(state("back") { $0.vault = .init(kind: "remote", hub: "h.example") })
+        #expect(try await bool("document.getElementById('backWhere').parentElement.hidden") == false)
+    }
+
     /// Renders `state` and returns what the page posted while doing so.
     func renderAndCollect(_ state: OnboardingState) async throws -> [OnboardingAction?] {
         try await sent(by: renderScript(state))
@@ -409,8 +463,10 @@ struct OnboardingPageTests {
         for selector in ["#hubInput", "#hubRemember", ".toggle", "#website"] {
             #expect(try await sent(by: down(selector)).isEmpty, "\(selector)")
         }
-        try await render(state("ready"))
-        #expect(try await sent(by: down(".screen.on summary")).isEmpty)
+        try await render(state("ready") { $0.error = "x" })
+        for selector in [".screen.on summary", "#readyLog", ".screen.on .banner"] {
+            #expect(try await sent(by: down(selector)).isEmpty, "\(selector)")
+        }
     }
 
     // MARK: Download

@@ -369,8 +369,9 @@ pre.log { margin: 8px 0 0; padding: 10px; border-radius: 8px; background: var(--
   const mains = [...document.querySelectorAll('[data-main]')];
   mains.forEach((b) => { b.dataset.label = b.querySelector('.label').textContent; });
 
-  /** A hub address as typed, for comparing with the checked one. */
-  const bare = (s) => String(s || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase();
+  /** A hub address as typed, for comparing with the checked one. Only https:// is implied;
+      an http:// (a local test hub, debug builds) stays part of the address. */
+  const bare = (s) => String(s || '').trim().replace(/^https:\/\//i, '').replace(/\/+$/, '').toLowerCase();
 
   function refreshButtons() {
     const s = last || {};
@@ -396,6 +397,7 @@ pre.log { margin: 8px 0 0; padding: 10px; border-radius: 8px; background: var(--
     screens.forEach((s, key) => {
       const on = key === name;
       s.classList.toggle('on', on);
+      s.inert = !on;
       s.classList.toggle('left', !on && to > from && key === current);
     });
     if (current === 'local') clearPassphrases();
@@ -430,14 +432,14 @@ pre.log { margin: 8px 0 0; padding: 10px; border-radius: 8px; background: var(--
   function enterHub() {
     const s = last;
     $('hubRemember').checked = s.rememberAddress !== false;
-    if (!hubInput.value && typeof s.hubAddress === 'string' && s.hubAddress) {
-      hubInput.value = s.hubAddress;
-      send('checkHub', hubInput.value.trim());
-    }
+    if (!hubInput.value && typeof s.hubAddress === 'string' && s.hubAddress) hubInput.value = s.hubAddress;
+    // Prefilled or kept from an earlier visit: check it again (the model's check starts idle).
+    clearTimeout(hubTimer);
+    if (hubInput.value.trim()) send('checkHub', hubInput.value.trim());
     hubInput.focus({ preventScroll: true });
   }
   hubInput.addEventListener('input', () => {
-    const stripped = hubInput.value.replace(/^\s*https?:\/\//i, '');
+    const stripped = hubInput.value.replace(/^\s*https:\/\//i, '');
     if (stripped !== hubInput.value) hubInput.value = stripped;
     refreshButtons();
     clearTimeout(hubTimer);
@@ -618,7 +620,7 @@ pre.log { margin: 8px 0 0; padding: 10px; border-radius: 8px; background: var(--
   // ---------- Dragging the window from an empty area ----------
   document.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
-    if (e.target instanceof Element && e.target.closest('button, input, a, label, summary, details, .choice')) return;
+    if (e.target instanceof Element && e.target.closest('button, input, a, label, summary, details, .choice, pre, .banner')) return;
     send('dragWindow');
   });
 
@@ -630,7 +632,10 @@ pre.log { margin: 8px 0 0; padding: 10px; border-radius: 8px; background: var(--
 
     const vault = state.vault && typeof state.vault === 'object' ? state.vault : null;
     const remote = !vault || vault.kind !== 'local';
-    text($('backWhere'), remote ? (typeof vault?.hub === 'string' ? vault.hub : '') : 'On this Mac');
+    const where = remote ? (typeof vault?.hub === 'string' ? vault.hub : '') : 'On this Mac';
+    text($('backWhere'), where);
+    const wherePill = $('backWhere').parentElement;
+    if (wherePill.hidden !== (where === '')) wherePill.hidden = where === '';
     text($('backOther'), remote ? 'Use a different hub' : 'Connect to a hub instead');
 
     paintHubCheck(state.hubCheck && typeof state.hubCheck === 'object' ? state.hubCheck : {});
