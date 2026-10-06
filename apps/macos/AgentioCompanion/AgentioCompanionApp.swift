@@ -15,6 +15,7 @@ struct AgentioCompanionApp: App {
         .windowResizability(.contentMinSize)
         .defaultSize(width: 720, height: 640)
         .commands { VaultCommands(model: appDelegate.model) }
+        Settings { SettingsView() }
     }
 }
 
