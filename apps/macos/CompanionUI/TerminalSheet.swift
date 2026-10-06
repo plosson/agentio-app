@@ -9,15 +9,20 @@ struct TerminalSheet: View {
     let close: () -> Void
     /// The command once started. The terminal stays after it ends, so the user can read its last lines.
     @State private var command: TerminalCommand?
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Add \(flow.displayName)").font(Theme.title)
             if let command {
-                EmbeddedTerminal(command: command, onStart: { flow.attach(stop: $0) }, onExit: { flow.exited($0) })
+                EmbeddedTerminal(command: command, dark: colorScheme == .dark,
+                                 onStart: { flow.attach(stop: $0) }, onExit: { flow.exited($0) })
                     .id(flow.id)
+                    .padding(14)
                     .frame(height: 360)
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusControl))
+                    .background(Theme.bg)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusCard))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.radiusCard).strokeBorder(Theme.border))
             }
             content
         }
@@ -65,6 +70,8 @@ struct TerminalSheet: View {
 /// (Not named TerminalView: that is SwiftTerm's own class.)
 private struct EmbeddedTerminal: NSViewRepresentable {
     let command: TerminalCommand
+    /// Dark mode: the terminal takes its colours from the sheet's, which SwiftTerm cannot follow by itself.
+    let dark: Bool
     /// Gets the way to stop the command, once it runs.
     let onStart: @MainActor (@escaping @MainActor () -> Void) -> Void
     let onExit: @MainActor (Int32?) -> Void
@@ -74,6 +81,8 @@ private struct EmbeddedTerminal: NSViewRepresentable {
     func makeNSView(context: Context) -> LocalProcessTerminalView {
         let view = LocalProcessTerminalView(frame: .zero)
         view.processDelegate = context.coordinator
+        view.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        style(view)
         view.startProcess(executable: command.executable.path, args: command.arguments,
                           environment: command.environment.map { "\($0.key)=\($0.value)" }, execName: "agentio")
         onStart { [weak view] in if let view { Self.stop(view) } }
@@ -81,7 +90,29 @@ private struct EmbeddedTerminal: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: LocalProcessTerminalView, context: Context) {}
+    func updateNSView(_ view: LocalProcessTerminalView, context: Context) { style(view) }
+
+    /// The sheet's colours (Theme.bg, Theme.text), and a palette that reads well on them.
+    private func style(_ view: LocalProcessTerminalView) {
+        view.nativeBackgroundColor = Theme.resolved(Theme.bg, dark: dark)
+        view.nativeForegroundColor = Theme.resolved(Theme.text, dark: dark)
+        view.caretColor = Theme.resolved(Theme.textSecondary, dark: dark)
+        view.selectedTextBackgroundColor = .selectedTextBackgroundColor
+        view.installColors((dark ? Self.darkPalette : Self.lightPalette).map { rgb in
+            SwiftTerm.Color(red: UInt16((rgb >> 16) & 0xFF) * 257, green: UInt16((rgb >> 8) & 0xFF) * 257,
+                            blue: UInt16(rgb & 0xFF) * 257)
+        })
+    }
+
+    /// The 16 ANSI colours: black, red, green, yellow, blue, magenta, cyan, white, then their bright forms.
+    private static let lightPalette: [UInt32] = [
+        0x1D1D1F, 0xC4302B, 0x1E8E3E, 0x9A6700, 0x0B63CE, 0x8E44AD, 0x00838F, 0x6E6E73,
+        0x6E6E73, 0xDC2626, 0x16A34A, 0xB45309, 0x2563EB, 0x9333EA, 0x0891B2, 0x1D1D1F,
+    ]
+    private static let darkPalette: [UInt32] = [
+        0x8E8E93, 0xF87171, 0x4ADE80, 0xFACC15, 0x60A5FA, 0xC084FC, 0x22D3EE, 0xD1D1D6,
+        0xA1A1A6, 0xFCA5A5, 0x86EFAC, 0xFDE047, 0x93C5FD, 0xD8B4FE, 0x67E8F9, 0xF5F5F7,
+    ]
 
     /// The flow stops the process when the sheet closes; this is the backstop if SwiftUI removes the view first.
     static func dismantleNSView(_ view: LocalProcessTerminalView, coordinator: Coordinator) {
@@ -101,6 +132,8 @@ private struct EmbeddedTerminal: NSViewRepresentable {
         func processTerminated(source: TerminalView, exitCode: Int32?) {
             let pid = (source as? LocalProcessTerminalView)?.process.shellPid ?? 0
             let code = reapedExitCode(pid: pid, reported: exitCode ?? 0)
+            // Nothing more to type: no blinking caret under the last line.
+            source.getTerminal().hideCursor()
             let onExit = onExit
             Task { @MainActor in onExit(code) }
         }

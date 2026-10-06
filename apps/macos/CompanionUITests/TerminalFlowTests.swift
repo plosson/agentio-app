@@ -1,4 +1,5 @@
 @testable import AgentioKit
+import AppKit
 import Foundation
 import Testing
 @testable import CompanionUI
@@ -121,5 +122,22 @@ struct TerminalFlowStopTests {
         flow.cancel()
         flow.attach { stops += 1 }
         #expect(stops == 1)
+    }
+}
+
+struct ThemeResolvedTests {
+    func hex(_ color: NSColor) -> UInt32 {
+        UInt32((color.redComponent * 255).rounded()) << 16 | UInt32((color.greenComponent * 255).rounded()) << 8
+            | UInt32((color.blueComponent * 255).rounded())
+    }
+
+    @Test func aTokenResolvesToItsLightOrDarkValueWhateverTheCurrentAppearance() {
+        for current in [NSAppearance.Name.aqua, .darkAqua] {
+            NSAppearance(named: current)!.performAsCurrentDrawingAppearance {
+                #expect(hex(Theme.resolved(Theme.bg, dark: false)) == 0xF5F5F7, "current: \(current.rawValue)")
+                #expect(hex(Theme.resolved(Theme.bg, dark: true)) == 0x1C1C1E, "current: \(current.rawValue)")
+                #expect(hex(Theme.resolved(Theme.text, dark: true)) == 0xF5F5F7, "current: \(current.rawValue)")
+            }
+        }
     }
 }
