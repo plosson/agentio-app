@@ -20,6 +20,15 @@ func cliEnv(_ loc: CliLocation, base: [String: String]) -> [String: String] {
     return env
 }
 
+/// Environment for the app's CLI in a terminal the user sees: `cliEnv`, with colour, and a terminal type
+/// the CLI's prompts know.
+func terminalEnv(_ loc: CliLocation, base: [String: String]) -> [String: String] {
+    var env = cliEnv(loc, base: base)
+    env["NO_COLOR"] = nil
+    env["TERM"] = "xterm-256color"
+    return env
+}
+
 /// Terminal escape sequences (colours, cursor moves), in case any get through.
 public func stripAnsi(_ text: String) -> String {
     text.replacing(/\u{1B}\[[0-9;?]*[ -\/]*[@-~]/, with: "")
