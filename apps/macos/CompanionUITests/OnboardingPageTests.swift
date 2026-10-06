@@ -512,3 +512,121 @@ struct OnboardingPageTests {
         #expect(try await int("[...document.querySelectorAll('[href], [src]')].filter(e => /^(https?:)?\\/\\//.test(e.getAttribute('href') || e.getAttribute('src'))).length") == 0)
     }
 }
+
+/// The window's web view: who may talk to the app, and where it may go (Review Focus 5).
+@MainActor
+struct OnboardingWebViewTests {
+    let received = ReceivedActions()
+
+    /// A web view whose handler was made for the bundled page, as `makeNSView` does.
+    private func webView(loading load: (WKWebView) -> Void) async throws -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        let received = received
+        configuration.userContentController.add(
+            OnboardingMessageHandler(pageURL: onboardingPageURL) { received.actions.append($0) },
+            name: "agentioOnboarding")
+        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 720, height: 640), configuration: configuration)
+        load(webView)
+        try await settle(webView)
+        return webView
+    }
+
+    private func settle(_ webView: WKWebView) async throws {
+        try await poll(seconds: 10) { !webView.isLoading && webView.url != nil }
+    }
+
+    private func poll(seconds: Int = 3, _ condition: () -> Bool) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(seconds)
+        while !condition() {
+            guard clock.now < deadline else { throw AgentioTestTimeout() }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    private let open = "window.webkit.messageHandlers.agentioOnboarding.postMessage({action: 'openWebsite', args: []})"
+
+    /// Runs `script`, then posts a valid dragWindow and waits for it: the handler gets messages in order,
+    /// so everything `script` posted has been decided by then.
+    private func post(_ script: String, in webView: WKWebView) async throws {
+        _ = try await webView.callAsyncJavaScript(script, contentWorld: .page)
+        // A round trip through the same handler: it is processed after the earlier messages.
+        _ = try await webView.callAsyncJavaScript(
+            "window.webkit.messageHandlers.agentioOnboarding.postMessage({action: 'dragWindow', args: []})",
+            contentWorld: .page)
+        try await poll { received.actions.contains(.dragWindow) }
+    }
+
+    @Test func aPageFromAnotherAddressIsNotHeard() async throws {
+        let webView = try await webView { $0.loadHTMLString("<html><body>evil</body></html>", baseURL: URL(string: "https://evil.example")) }
+        try await webView.callAsyncJavaScript(open, contentWorld: .page)
+        try await webView.callAsyncJavaScript("window.webkit.messageHandlers.agentioOnboarding.postMessage({action: 'dragWindow', args: []})", contentWorld: .page)
+        try await Task.sleep(for: .milliseconds(300))  // nothing to wait for: the absence of a message
+        #expect(received.actions.isEmpty)
+    }
+
+    @Test func theBundledPageIsHeard() async throws {
+        let webView = try await webView { $0.loadFileURL(onboardingPageURL, allowingReadAccessTo: onboardingPageURL.deletingLastPathComponent()) }
+        _ = try await webView.callAsyncJavaScript(open, contentWorld: .page)
+        try await poll { received.actions == [.openWebsite] }
+    }
+
+    @Test func aFragmentOnTheBundledPageIsStillThePage() async throws {
+        let webView = try await webView { $0.loadFileURL(onboardingPageURL, allowingReadAccessTo: onboardingPageURL.deletingLastPathComponent()) }
+        _ = try await webView.callAsyncJavaScript("history.replaceState(null, '', '#x')", contentWorld: .page)
+        _ = try await webView.callAsyncJavaScript(open, contentWorld: .page)
+        try await poll { received.actions == [.openWebsite] }
+    }
+
+    @Test func aMalformedMessageFromThePageIsNotHeard() async throws {
+        let webView = try await webView { $0.loadFileURL(onboardingPageURL, allowingReadAccessTo: onboardingPageURL.deletingLastPathComponent()) }
+        try await post("""
+            const h = window.webkit.messageHandlers.agentioOnboarding;
+            h.postMessage('openWebsite'); h.postMessage({action: 'openWebsite', args: [1]}); h.postMessage({action: 'x', args: []})
+            """, in: webView)
+        #expect(received.actions == [.dragWindow])
+    }
+
+    @Test func aFrameInThePageIsNotHeard() async throws {
+        let webView = try await webView { $0.loadFileURL(onboardingPageURL, allowingReadAccessTo: onboardingPageURL.deletingLastPathComponent()) }
+        // The page's CSP has no frame-src, so the frame may not even load; either way nothing arrives.
+        try await post("""
+            const frame = document.createElement('iframe');
+            frame.srcdoc = "<script>window.webkit.messageHandlers.agentioOnboarding.postMessage({action: 'openWebsite', args: []})<\\/script>";
+            document.body.appendChild(frame);
+            await new Promise(resolve => setTimeout(resolve, 300));
+            """, in: webView)
+        #expect(received.actions == [.dragWindow])
+    }
+
+    // MARK: Navigation
+
+    @Test func onlyThePageItselfMayBeLoaded() {
+        let page = onboardingPageURL
+        #expect(allowsNavigation(to: page, page: page))
+        #expect(allowsNavigation(to: URL(string: page.absoluteString + "#x"), page: page))
+        #expect(!allowsNavigation(to: URL(string: "https://example.com"), page: page))
+        #expect(!allowsNavigation(to: URL(string: "file:///etc/passwd"), page: page))
+        #expect(!allowsNavigation(to: page.deletingLastPathComponent(), page: page))
+        #expect(!allowsNavigation(to: URL(string: "about:blank"), page: page))
+        #expect(!allowsNavigation(to: nil, page: page))
+    }
+
+    @Test func aNavigationAwayLeavesThePageInPlace() async throws {
+        let model = CompanionModel(backend: FakeBackend(), settings: CompanionSettings(defaults: UserDefaults(suiteName: "tests-\(UUID().uuidString)")!),
+                                   allowLocalHTTP: false, deviceName: "mac", openURL: { _ in }, copy: { _ in })
+        let coordinator = OnboardingWebView.Coordinator(model: model)
+        let webView = coordinator.makeWebView(state: state("welcome"))
+        try await settle(webView)
+        #expect(webView.url?.standardizedFileURL == onboardingPageURL.standardizedFileURL)
+
+        _ = try await webView.callAsyncJavaScript("location.href = 'https://example.com'", contentWorld: .page)
+        try await Task.sleep(for: .seconds(1))  // the absence of a navigation: nothing to wait for
+        #expect(webView.url?.standardizedFileURL == onboardingPageURL.standardizedFileURL)
+        OnboardingWebView.dismantleNSView(webView, coordinator: coordinator)
+    }
+}
+
+@MainActor final class ReceivedActions {
+    var actions: [OnboardingAction] = []
+}
