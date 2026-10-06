@@ -26,6 +26,15 @@ struct OnboardingState: Encodable, Equatable {
     struct Finished: Encodable, Equatable { var kind: String; var hub: String? }      // kind: "remote" | "local"
 }
 
+/// The bundled onboarding page.
+let onboardingPageURL: URL = {
+    final class Token {}
+    guard let url = Bundle(for: Token.self).url(forResource: "onboarding", withExtension: "html") else {
+        fatalError("onboarding.html is missing from CompanionUI's resources")
+    }
+    return url
+}()
+
 /// A hub address as the page shows it: without a leading "https://".
 private func bareHub(_ hub: String) -> String {
     hub.hasPrefix("https://") ? String(hub.dropFirst("https://".count)) : hub
