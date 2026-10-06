@@ -12,12 +12,25 @@ public enum BridgeCall: Equatable, Sendable {
     case dragWindow
     /// Sign in to the hub again, for a key that may manage profiles.
     case signInAgain
+    /// The items of the menu WebKit opens for the right-click under way, in place of its own;
+    /// the reply is the chosen item's id, or null. The page must not cancel the event.
+    case contextMenu([MenuEntry])
+
+    public enum MenuEntry: Equatable, Sendable {
+        case item(id: String, title: String)
+        case separator
+    }
 
     /// The message `bridgeScript` posts, `{ method, args }`; nil for anything else.
     public init?(message body: Any) {
         guard let message = body as? [String: Any],
               let method = message["method"] as? String,
               let args = message["args"] as? [Any] else { return nil }
+        if method == "contextMenu" {
+            guard args.count == 1, let entries = Self.menuEntries(args[0]) else { return nil }
+            self = .contextMenu(entries)
+            return
+        }
         let strings = args.compactMap { $0 as? String }
         guard strings.count == args.count, strings.allSatisfy({ !$0.isEmpty }) else { return nil }
         switch (method, strings.count) {
@@ -31,6 +44,28 @@ public enum BridgeCall: Equatable, Sendable {
         case ("signInAgain", 0): self = .signInAgain
         default: return nil
         }
+    }
+
+    /// 1 to 20 entries, at least one item: `"-"` or `{ id, title }` with exactly those keys,
+    /// a unique id like `delete-profile`, and a title of 1 to 80 characters on one line.
+    private static func menuEntries(_ value: Any) -> [MenuEntry]? {
+        guard let raw = value as? [Any], (1...20).contains(raw.count) else { return nil }
+        var ids = Set<String>()
+        var entries: [MenuEntry] = []
+        for entry in raw {
+            if entry as? String == "-" {
+                entries.append(.separator)
+                continue
+            }
+            guard let fields = entry as? [String: Any], Set(fields.keys) == ["id", "title"],
+                  let id = fields["id"] as? String, id.wholeMatch(of: /[a-z][a-z0-9-]{0,31}/) != nil,
+                  let title = fields["title"] as? String, (1...80).contains(title.count),
+                  !title.trimmingCharacters(in: .whitespaces).isEmpty,
+                  !title.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+                  ids.insert(id).inserted else { return nil }
+            entries.append(.item(id: id, title: title))
+        }
+        return ids.isEmpty ? nil : entries
     }
 }
 
@@ -56,6 +91,7 @@ func bridgeScript(canManageProfiles: Bool?) -> String {
       openTerminal: () => call("openTerminal", []),
       dragWindow: () => call("dragWindow", []),
       signInAgain: () => call("signInAgain", []),
+      contextMenu: (items) => call("contextMenu", [items]),
     }),
   });
 })();
@@ -90,10 +126,11 @@ private struct Origin: Equatable {
 /// that are not from the hub's origin.
 final class BridgeHandler: NSObject, WKScriptMessageHandlerWithReply {
     private let allowedOrigin: Origin?
-    private let onCall: @MainActor (BridgeCall) -> Void
+    private let onCall: @MainActor (BridgeCall, @escaping @MainActor (String?) -> Void) -> Void
 
-    /// `hubURL` is the hub page; only pages from its origin may call.
-    init(hubURL: URL, onCall: @escaping @MainActor (BridgeCall) -> Void) {
+    /// `hubURL` is the hub page; only pages from its origin may call. `onCall` gets the call and
+    /// the way to answer it, once.
+    init(hubURL: URL, onCall: @escaping @MainActor (BridgeCall, @escaping @MainActor (String?) -> Void) -> Void) {
         self.allowedOrigin = Origin(url: hubURL)
         self.onCall = onCall
     }
@@ -112,8 +149,7 @@ final class BridgeHandler: NSObject, WKScriptMessageHandlerWithReply {
               let call = BridgeCall(message: message.body) else {
             return replyHandler(nil, "Invalid agentioCompanion call")
         }
-        onCall(call)
-        replyHandler(nil, nil)
+        onCall(call) { replyHandler($0, nil) }
     }
 }
 
@@ -138,11 +174,15 @@ func profilesChangedScript(_ notice: PageNotice) -> String {
     return "window.dispatchEvent(new CustomEvent('agentio:profiles-changed', { detail: { service: \(literal(notice.service)), profile: \(profile) } }));"
 }
 
-/// The bridge's actions, for the page in `webView`. The terminal action
-/// is a stub until the terminal (S7) exists.
+/// The bridge's actions, for the page in `webView`; `reply` answers the page, once.
+/// The terminal action is a stub until the terminal (S7) exists.
 @MainActor func performBridgeCall(_ call: BridgeCall, in webView: HubWebView?, signInAgain: () -> Void,
-                                  addProfile: (String, String?) -> Void, reauth: (String, String?, String?) -> Void) {
+                                  addProfile: (String, String?) -> Void, reauth: (String, String?, String?) -> Void,
+                                  reply: @escaping @MainActor (String?) -> Void = { _ in }) {
     switch call {
+    case .contextMenu(let entries):
+        guard let webView else { return reply(nil) }
+        return webView.offerMenu(entries, reply: reply)
     case .addProfile(let service, let displayName):
         addProfile(service, displayName)
     case .reauth(let service, let name, let displayName):
@@ -154,4 +194,5 @@ func profilesChangedScript(_ notice: PageNotice) -> String {
     case .signInAgain:
         signInAgain()
     }
+    reply(nil)
 }
