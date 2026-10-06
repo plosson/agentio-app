@@ -150,10 +150,23 @@ enum OnboardingAction: Equatable {
     }
 }
 
+extension OnboardingAction {
+    /// Whether the action starts a step, which must not run twice or while another step runs.
+    fileprivate var startsStep: Bool {
+        switch self {
+        case .chooseHub, .chooseLocal, .signIn, .createVault, .back, .openExistingVault, .useAnotherVault,
+             .openVault, .retryDownload: true
+        case .checkHub, .cancelSignIn, .openApproval, .copyApprovalLink, .openWebsite, .dragWindow: false
+        }
+    }
+}
+
 /// Do what the page asked, on `model`; dragWindow moves `webView`'s window.
-/// An action that doesn't belong to the current screen does nothing.
+/// An action that doesn't belong to the current screen does nothing, and a
+/// step-starting action does nothing while a step is running (`model.busy`).
 @MainActor func perform(_ action: OnboardingAction, on model: CompanionModel, webView: HubWebView?) {
     if let screens = action.screens, !screens.contains(onboardingState(of: model).screen) { return }
+    if action.startsStep, model.busy != nil { return }
     switch action {
     case .chooseHub, .useAnotherVault: model.goRemote()
     case .chooseLocal: model.goLocal()

@@ -26,6 +26,7 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     private var _loginRight: Bool? = true
     private var _initVault: Result<Void, AgentioError> = .success(())
     private var _passphrases: [String] = []
+    private var _initVaultGate = false
     private var _daemons: [FakeDaemon] = []
     private var _daemonError: AgentioError?
 
@@ -60,6 +61,8 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     var loginRight: Bool? { get { locked { _loginRight } } set { locked { _loginRight = newValue } } }
     var initVaultResult: Result<Void, AgentioError> { get { locked { _initVault } } set { locked { _initVault = newValue } } }
     var passphrases: [String] { locked { _passphrases } }
+    /// While true, `initVault` waits after recording its passphrase (and stops when its task is cancelled).
+    var initVaultGate: Bool { get { locked { _initVaultGate } } set { locked { _initVaultGate = newValue } } }
     var daemons: [FakeDaemon] { locked { _daemons } }
     var daemonError: AgentioError? { get { locked { _daemonError } } set { locked { _daemonError = newValue } } }
 
@@ -143,6 +146,7 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
 
     func initVault(passphrase: String) async throws {
         locked { _passphrases.append(passphrase) }
+        while initVaultGate { try await Task.sleep(for: .milliseconds(10)) }
         try initVaultResult.get()
     }
 

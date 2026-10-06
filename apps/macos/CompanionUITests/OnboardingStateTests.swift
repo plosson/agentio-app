@@ -71,10 +71,11 @@ struct OnboardingStateTests {
         model.goLocal()
         let create = Task { await model.createLocalVault(passphrase: "correct horse", again: "correct horse") }
         await eventually { model.screen == .installing }
+        await eventually { model.download.percent == 38 }  // the download fills 0–90%
         let state = onboardingState(of: model)
         #expect(state.screen == "ready")
         #expect(state.download.phase == "downloading")
-        #expect(state.download.percent == 42)
+        #expect(state.download.percent == 38)
         backend.detected = installed
         backend.openInstallGate()
         await create.value
@@ -273,9 +274,12 @@ struct OnboardingStateTests {
     @Test func aStalePageCannotSkipSteps() async {
         await model.start()
         #expect(screen == "welcome")
+        // Each async step does something synchronously before its first await
+        // (signIn: busy, hubURL; checkHub: hubCheck; createVault: error), so a
+        // missing guard shows after one yield.
         perform(.signIn(address: "h.example", remember: true), on: model, webView: nil)
         perform(.checkHub("h.example"), on: model, webView: nil)
-        perform(.createVault(passphrase: "correct horse", again: "correct horse"), on: model, webView: nil)
+        perform(.createVault(passphrase: "short", again: "short"), on: model, webView: nil)
         perform(.openVault, on: model, webView: nil)
         perform(.openApproval, on: model, webView: nil)
         perform(.copyApprovalLink, on: model, webView: nil)
@@ -285,11 +289,58 @@ struct OnboardingStateTests {
         perform(.retryDownload, on: model, webView: nil)
         perform(.back, on: model, webView: nil)
         await Task.yield()
-        #expect(backend.logins.isEmpty)
-        #expect(backend.hubChecks.isEmpty)
-        #expect(backend.passphrases.isEmpty)
-        #expect(backend.daemons.isEmpty)
+        await Task.yield()
+        #expect(model.busy == nil)
+        #expect(model.hubURL == "")
+        #expect(settings.rememberedHubURL == nil)
+        #expect(model.hubCheck == .idle)
+        #expect(model.error == nil)
+        #expect(!model.copiedLink)
+        #expect(model.screen == .mode)
         #expect(screen == "welcome")
+        #expect(backend.logins.isEmpty)
+        #expect(backend.passphrases.isEmpty)
+    }
+
+    @Test func aSecondStepWhileOneRunsDoesNothing() async {
+        await model.start()
+        model.goRemote()
+        backend.hubVersionGates = ["https://h.example"]
+        perform(.signIn(address: "h.example", remember: true), on: model, webView: nil)
+        await eventually { model.busy != nil }
+        #expect(onboardingState(of: model).busy == "Checking the hub…")
+        perform(.signIn(address: "h.example", remember: true), on: model, webView: nil)
+        perform(.back, on: model, webView: nil)
+        perform(.chooseLocal, on: model, webView: nil)
+        await Task.yield()
+        await Task.yield()
+        #expect(screen == "hub")  // back did not reset the screen
+        #expect(backend.hubChecks.count == 1)  // one sign-in, not two
+        // checkHub and cancelSignIn still work while busy.
+        perform(.checkHub(""), on: model, webView: nil)
+        #expect(onboardingState(of: model).hubCheck.state == "idle")
+        backend.loginCode = code
+        backend.openHubVersionGate("https://h.example")
+        await eventually { screen == "approve" }
+        #expect(backend.logins.count == 1)
+        perform(.cancelSignIn, on: model, webView: nil)
+        await eventually { screen == "hub" && model.error != nil }
+    }
+
+    @Test func aDoublePressedCreateRunsOneInitVault() async {
+        await model.start()
+        model.goLocal()
+        backend.initVaultGate = true
+        perform(.createVault(passphrase: "correct horse", again: "correct horse"), on: model, webView: nil)
+        await eventually { backend.passphrases.count == 1 && model.busy != nil }
+        perform(.createVault(passphrase: "correct horse", again: "correct horse"), on: model, webView: nil)
+        perform(.back, on: model, webView: nil)
+        await Task.yield()
+        await Task.yield()
+        #expect(screen == "local")
+        backend.initVaultGate = false
+        await eventually { screen == "done" }
+        #expect(backend.passphrases.count == 1)
     }
 
     @Test func openingAVaultFromWelcomeOpensNothing() async {
@@ -321,7 +372,7 @@ struct OnboardingStateTests {
         await eventually { backend.logins.count == 1 }
         await eventually { screen == "approve" }
         perform(.cancelSignIn, on: model, webView: nil)
-        await eventually { screen == "hub" || model.error != nil }
+        await eventually { screen == "hub" && model.error != nil }
     }
 
     @Test func createVaultOnTheLocalScreenReachesTheBackend() async {
@@ -349,7 +400,7 @@ struct OnboardingStateTests {
         #expect(screen == "hub")
     }
 
-    @Test func retryDownloadOnlyOnTheFailedScreen() async {
+    @Test func retryDownloadRestartsAFailedDownloadAndGoesBack() async {
         backend.detected = nil
         backend.installResult = .failure(AgentioError("no network"))
         await model.start()
