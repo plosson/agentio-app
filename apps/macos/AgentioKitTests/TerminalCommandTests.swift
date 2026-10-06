@@ -44,3 +44,45 @@ struct TerminalCommandTests {
         #expect(cliEnv(loc, base: [:])["NO_COLOR"] == "1")
     }
 }
+
+struct TerminalExitTests {
+    @Test func aWaitStatusDecodesToItsExitCode() {
+        #expect(exitCode(fromWaitStatus: 0) == 0)
+        #expect(exitCode(fromWaitStatus: 1 << 8) == 1)
+        #expect(exitCode(fromWaitStatus: 130 << 8) == 130)
+        #expect(exitCode(fromWaitStatus: 255 << 8) == 255)
+    }
+
+    @Test func aSignalDecodesToNil() {
+        for signal: Int32 in [SIGTERM, SIGINT, SIGKILL, SIGHUP, SIGTERM | 0x80] {
+            #expect(exitCode(fromWaitStatus: signal) == nil, "status: \(signal)")
+        }
+    }
+
+    /// A child that is not reaped yet: its own status wins over the 0 a too-early WNOHANG reported.
+    @Test func anUnreapedChildGivesItsRealStatus() throws {
+        let pid = try spawn("exit 3")
+        #expect(reapedExitCode(pid: pid, reported: 0) == 3)
+        let killed = try spawn("kill -KILL $$")
+        #expect(reapedExitCode(pid: killed, reported: 0) == nil)
+    }
+
+    /// A child someone else reaped: the reported status, decoded.
+    @Test func anAlreadyReapedChildGivesTheReportedStatus() throws {
+        let pid = try spawn("exit 4")
+        var status: Int32 = 0
+        #expect(waitpid(pid, &status, 0) == pid)
+        #expect(reapedExitCode(pid: pid, reported: status) == 4)
+        #expect(reapedExitCode(pid: pid, reported: SIGTERM) == nil)
+    }
+
+    private func spawn(_ script: String) throws -> pid_t {
+        var pid: pid_t = 0
+        let args = ["/bin/sh", "-c", script]
+        var argv: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) } + [nil]
+        defer { argv.forEach { free($0) } }
+        let result = posix_spawn(&pid, "/bin/sh", nil, nil, &argv, nil)
+        guard result == 0 else { throw AgentioError("posix_spawn failed: \(result)") }
+        return pid
+    }
+}

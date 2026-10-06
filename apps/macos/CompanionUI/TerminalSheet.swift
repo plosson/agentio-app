@@ -14,7 +14,7 @@ struct TerminalSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Add \(flow.displayName)").font(Theme.title)
             if let command {
-                EmbeddedTerminal(command: command, onExit: { flow.exited($0) })
+                EmbeddedTerminal(command: command, onStart: { flow.attach(stop: $0) }, onExit: { flow.exited($0) })
                     .id(flow.id)
                     .frame(height: 360)
                     .clipShape(RoundedRectangle(cornerRadius: Theme.radiusControl))
@@ -65,6 +65,8 @@ struct TerminalSheet: View {
 /// (Not named TerminalView: that is SwiftTerm's own class.)
 private struct EmbeddedTerminal: NSViewRepresentable {
     let command: TerminalCommand
+    /// Gets the way to stop the command, once it runs.
+    let onStart: @MainActor (@escaping @MainActor () -> Void) -> Void
     let onExit: @MainActor (Int32?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(onExit: onExit) }
@@ -74,14 +76,20 @@ private struct EmbeddedTerminal: NSViewRepresentable {
         view.processDelegate = context.coordinator
         view.startProcess(executable: command.executable.path, args: command.arguments,
                           environment: command.environment.map { "\($0.key)=\($0.value)" }, execName: "agentio")
+        onStart { [weak view] in if let view { Self.stop(view) } }
         DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
         return view
     }
 
     func updateNSView(_ view: LocalProcessTerminalView, context: Context) {}
 
-    /// `terminate()` signals the process id even after it ended, so only while it runs.
+    /// The flow stops the process when the sheet closes; this is the backstop if SwiftUI removes the view first.
     static func dismantleNSView(_ view: LocalProcessTerminalView, coordinator: Coordinator) {
+        stop(view)
+    }
+
+    /// `terminate()` signals the process id even after it ended, so only while it runs.
+    private static func stop(_ view: LocalProcessTerminalView) {
         if view.process.running { view.process.terminate() }
     }
 
@@ -89,9 +97,12 @@ private struct EmbeddedTerminal: NSViewRepresentable {
         let onExit: @MainActor (Int32?) -> Void
         init(onExit: @escaping @MainActor (Int32?) -> Void) { self.onExit = onExit }
 
+        /// SwiftTerm passes a raw wait status, possibly read too early; `reapedExitCode` decodes the real one.
         func processTerminated(source: TerminalView, exitCode: Int32?) {
+            let pid = (source as? LocalProcessTerminalView)?.process.shellPid ?? 0
+            let code = reapedExitCode(pid: pid, reported: exitCode ?? 0)
             let onExit = onExit
-            Task { @MainActor in onExit(exitCode) }
+            Task { @MainActor in onExit(code) }
         }
         func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
         func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}

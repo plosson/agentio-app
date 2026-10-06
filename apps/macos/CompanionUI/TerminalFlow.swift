@@ -2,8 +2,8 @@ import AgentioKit
 import Foundation
 import Observation
 
-/// Adding one profile in a terminal: agentio asks, the user answers. The sheet's terminal runs the command
-/// and reports its exit here; closing the sheet stops it.
+/// Adding one profile in a terminal: agentio asks, the user answers. The sheet's terminal runs the command,
+/// attaches a way to stop it, and reports its exit here; cancelling stops it.
 @MainActor @Observable
 public final class TerminalFlow: Identifiable {
     public enum Step: Equatable {
@@ -25,6 +25,8 @@ public final class TerminalFlow: Identifiable {
 
     private let backend: any CompanionBackend
     private let onAdded: @MainActor (String) -> Void
+    /// Stops the terminal's process; set by the sheet's terminal once it runs.
+    private var stop: (@MainActor () -> Void)?
 
     init(service: String, displayName: String, backend: any CompanionBackend, onAdded: @escaping @MainActor (String) -> Void) {
         self.service = service
@@ -53,5 +55,17 @@ public final class TerminalFlow: Identifiable {
         }
     }
 
-    public func cancel() { isCancelled = true }
+    /// The sheet's terminal started the command; `stop` ends it. Already cancelled: it ends now.
+    public func attach(stop: @escaping @MainActor () -> Void) {
+        guard !isCancelled else { return stop() }
+        self.stop = stop
+    }
+
+    /// The sheet is closing: stop the process, and ignore its end.
+    public func cancel() {
+        guard !isCancelled else { return }
+        isCancelled = true
+        stop?()
+        stop = nil
+    }
 }

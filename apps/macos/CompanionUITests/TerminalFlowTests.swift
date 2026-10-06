@@ -94,3 +94,32 @@ struct TerminalFlowTests {
     private(set) var services: [String] = []
     func add(_ service: String) { services.append(service) }
 }
+
+@MainActor
+struct TerminalFlowStopTests {
+    let backend = FakeBackend()
+
+    func flow() -> TerminalFlow {
+        TerminalFlow(service: "gcal", displayName: "Google Calendar", backend: backend, onAdded: { _ in })
+    }
+
+    @Test func cancelStopsTheAttachedProcessOnce() {
+        let flow = flow()
+        var stops = 0
+        flow.start()
+        flow.attach { stops += 1 }
+        #expect(stops == 0)
+        flow.cancel()
+        flow.cancel()
+        #expect(stops == 1)
+    }
+
+    @Test func aProcessAttachedAfterCancelIsStoppedAtOnce() {
+        let flow = flow()
+        var stops = 0
+        flow.start()
+        flow.cancel()
+        flow.attach { stops += 1 }
+        #expect(stops == 1)
+    }
+}

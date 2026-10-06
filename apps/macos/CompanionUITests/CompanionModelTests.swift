@@ -112,6 +112,29 @@ struct CompanionModelTests {
         #expect(model.terminalFlow !== flow)
     }
 
+    @Test func everyWayOfClosingStopsTheTerminalsProcess() async throws {
+        settings.setupMode = .terminal
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        let closers: [(String, () async -> Void)] = [
+            ("closeTerminalFlow", { model.closeTerminalFlow() }),
+            ("switchVault", { await model.switchVault() }),
+            ("shutdown", { await model.shutdown() }),
+            // Last: its sign-in waits for the fake hub, so it is not awaited.
+            ("signInAgain", { Task { await model.signInAgain() }; await eventually { model.terminalFlow == nil } }),
+        ]
+        for (name, close) in closers {
+            if model.screen != .vault { await model.openRemoteVault() }
+            model.addProfile(service: "gcal", displayName: nil)
+            let flow = try #require(model.terminalFlow, "\(name)")
+            var stops = 0
+            flow.start()
+            flow.attach { stops += 1 }
+            await close()
+            #expect(stops == 1, "\(name)")
+            #expect(model.terminalFlow == nil, "\(name)")
+        }
+    }
+
     @Test func anAddedProfileIsANoticeForThePage() async throws {
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
         await model.openRemoteVault()
