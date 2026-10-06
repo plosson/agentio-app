@@ -24,6 +24,15 @@ enum Theme {
     static let radiusControl: CGFloat = 8
     static let radiusCard: CGFloat = 12
 
+    /// A token's colour in light or dark mode, for AppKit views that cannot follow the appearance.
+    static func resolved(_ color: Color, dark: Bool) -> NSColor {
+        var resolved = NSColor.black
+        NSAppearance(named: dark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance {
+            resolved = NSColor(color).usingColorSpace(.sRGB) ?? .black
+        }
+        return resolved
+    }
+
     private static func dynamic(light: UInt32, dark: UInt32) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             let rgb = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
