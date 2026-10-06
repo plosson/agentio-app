@@ -43,6 +43,30 @@ public enum HubCheck: Equatable, Sendable {
     case tooOld(hub: String, version: String)
 }
 
+/// The bar under a vault page: which vault it is, and which AgentIO the app runs.
+public struct Footer: Equatable, Sendable {
+    public enum Vault: Equatable, Sendable {
+        /// The hub's host, with its port when it has one.
+        case hub(String)
+        case local
+        /// The hub's approval page, during a sign-in.
+        case signingIn(String)
+    }
+    public enum Agentio: Equatable, Sendable {
+        case unknown
+        /// The update check has not answered, or could not.
+        case version(String)
+        case upToDate(String)
+        case updateAvailable(current: String, latest: String)
+        case updating(percent: Int)
+        case updateFailed(current: String, latest: String)
+        /// A source folder (`devAgentioRepo`) runs instead of the app's own; never checked or updated.
+        case dev(version: String?, folder: String)
+    }
+    public let vault: Vault
+    public let agentio: Agentio
+}
+
 /// The onboarding's state and steps. Views read it and call its steps.
 @MainActor @Observable
 public final class CompanionModel {
@@ -112,8 +136,10 @@ public final class CompanionModel {
     private var pendingPage: String?
     /// Loading the add sheet; stopped with the sheet.
     private var addFlowStart: Task<Void, Never>?
-    /// Whether the app runs a developer's checkout (`devAgentioRepo`), as read at launch.
-    private let devAgentio: Bool
+    /// The source folder the app runs instead of its own CLI (`devAgentioRepo`), as read at launch.
+    private let devAgentioRepo: URL?
+    /// The last update check's answer; it counts only while its `current` is the CLI's version.
+    private var cliUpdate: CliUpdate?
 
     public init(backend: any CompanionBackend, settings: CompanionSettings, allowLocalHTTP: Bool, deviceName: String,
                 openURL: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) },
@@ -128,13 +154,41 @@ public final class CompanionModel {
         self.allowLocalHTTP = allowLocalHTTP
         self.deviceName = deviceName
         if let remembered = settings.rememberedHubURL { hubURL = remembered }
-        devAgentio = settings.devAgentioRepo != nil
+        devAgentioRepo = settings.devAgentioRepo
     }
 
     public var windowTitle: String {
-        let dev = devAgentio ? " (dev AgentIO)" : ""
-        guard let host = vaultPage?.host() else { return "AgentIO Companion\(dev)" }
-        return "AgentIO Companion — \(host)\(vaultPage?.port.map { ":\($0)" } ?? "")\(dev)"
+        let dev = devAgentioRepo != nil ? " (dev AgentIO)" : ""
+        guard let host = hostLabel(vaultPage) else { return "AgentIO Companion\(dev)" }
+        return "AgentIO Companion — \(host)\(dev)"
+    }
+
+    /// Nil on the app's own screens.
+    public var footer: Footer? {
+        guard vaultPage != nil else { return nil }
+        let host = hostLabel(URL(string: hubURL)) ?? hubURL
+        let vault: Footer.Vault = screen == .approving ? .signingIn(host)
+            : hubURL == daemon?.url.absoluteString ? .local : .hub(host)
+        return Footer(vault: vault, agentio: agentioStatus)
+    }
+
+    private var agentioStatus: Footer.Agentio {
+        if let devAgentioRepo {
+            return .dev(version: cli?.version, folder: (devAgentioRepo.path as NSString).abbreviatingWithTildeInPath)
+        }
+        if isDownloading { return .updating(percent: download.percent) }
+        guard let cli else { return .unknown }
+        guard let cliUpdate, cliUpdate.current == cli.version else { return .version(cli.version) }
+        guard cliUpdate.updateAvailable else { return .upToDate(cli.version) }
+        return download.phase == .failed
+            ? .updateFailed(current: cli.version, latest: cliUpdate.latest)
+            : .updateAvailable(current: cli.version, latest: cliUpdate.latest)
+    }
+
+    /// `host` or `host:port`.
+    private func hostLabel(_ url: URL?) -> String? {
+        guard let host = url?.host() else { return nil }
+        return "\(host)\(url?.port.map { ":\($0)" } ?? "")"
     }
 
     /// Start the CLI download if the app's CLI is missing or too old, then show the mode screen.
@@ -498,6 +552,23 @@ public final class CompanionModel {
 
     // MARK: Vault window (S6)
 
+    /// Install the newer AgentIO the footer offers, in the background, then check again.
+    public func updateAgentio() async {
+        switch footer?.agentio {
+        case .updateAvailable, .updateFailed: break
+        default: return
+        }
+        _ = await startDownload(atLeast: minimumCliVersion).value
+        await checkCliUpdate()
+    }
+
+    /// Ask once per CLI version whether a newer AgentIO exists; never for a source folder.
+    private func checkCliUpdate() async {
+        guard devAgentioRepo == nil, let cli, cliUpdate?.current != cli.version,
+              let update = try? await backend.checkCliUpdate() else { return }
+        cliUpdate = update
+    }
+
     /// Back to the app's own screens (the local daemon, if any, keeps running).
     public func switchVault() async {
         closeAddFlow()
@@ -584,6 +655,7 @@ public final class CompanionModel {
         }
         vaultPage = url
         screen = .vault
+        Task { await checkCliUpdate() }
     }
 
     private func abandonLogin() {

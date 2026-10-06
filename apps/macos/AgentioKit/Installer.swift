@@ -117,6 +117,27 @@ extension AgentioCLI {
     }
 }
 
+/// What `agentio update --check --json` says about the app's CLI.
+public struct CliUpdate: Sendable, Equatable {
+    public let current: String
+    public let latest: String
+    public let updateAvailable: Bool
+}
+
+extension AgentioCLI {
+    /// Ask the CLI whether a newer release exists; it asks GitHub. Throws when
+    /// it cannot say: no network, or an agentio without `update --check --json`.
+    public func checkUpdate() async throws -> CliUpdate {
+        let result = try await execute(["update", "--check", "--json"], timeout: .seconds(30))
+        guard result.exitCode == 0, let event = result.events.last(where: { $0.name == "version" }),
+              let current = event.string("current"), let latest = event.string("latest"),
+              let available = event.bool("updateAvailable") else {
+            throw failure(result, fallback: "agentio could not check for updates")
+        }
+        return CliUpdate(current: current, latest: latest, updateAvailable: available)
+    }
+}
+
 /// Download the official installer script.
 @Sendable public func fetchOfficialInstaller() async throws -> Data {
     let request = URLRequest(url: installScriptURL, timeoutInterval: 30)

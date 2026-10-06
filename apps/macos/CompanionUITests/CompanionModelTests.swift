@@ -943,6 +943,134 @@ struct CompanionModelTests {
         backend.openInstallGate()
     }
 
+    // MARK: Footer
+
+    func openHub() async {
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.openRemoteVault()
+    }
+
+    @Test func theFooterShowsOnlyUnderAVaultPage() async {
+        #expect(model.footer == nil)
+        await model.start()
+        #expect(model.footer == nil)
+        await openHub()
+        #expect(model.footer?.vault == .hub("h.example"))
+        await model.switchVault()
+        #expect(model.footer == nil)
+    }
+
+    @Test func aLocalVaultSaysSo() async {
+        await model.openLocalVault()
+        #expect(model.footer?.vault == .local)
+    }
+
+    @Test func theApprovalPageSaysWhichHubTheSignInIsFor() async {
+        backend.loginCode = code
+        let signIn = Task { await model.signIn(url: "https://h.example:8443", remember: false) }
+        await eventually { model.loginCode == code }
+        #expect(model.footer == nil)  // the code screen is the app's own
+        model.openApproval()
+        #expect(model.footer?.vault == .signingIn("h.example:8443"))
+        backend.finishLogin(.success(()))
+        await signIn.value
+        #expect(model.footer == nil)  // "All set" is the app's own screen
+    }
+
+    @Test func theCheckSaysWhetherTheAppsAgentioIsTheLatest() async {
+        backend.cliUpdateResult = .success(CliUpdate(current: "3.14.0", latest: "3.14.0", updateAvailable: false))
+        await openHub()
+        await eventually { model.footer?.agentio == .upToDate("3.14.0") }
+        backend.cliUpdateResult = .success(CliUpdate(current: "3.14.0", latest: "3.17.1", updateAvailable: true))
+        await model.switchVault()
+        await openHub()
+        try? await Task.sleep(for: .milliseconds(50))
+        // Once per version: the second vault page does not ask again.
+        #expect(backend.cliUpdateChecks == 1)
+        #expect(model.footer?.agentio == .upToDate("3.14.0"))
+    }
+
+    @Test func aFailedCheckShowsTheVersionAndIsTriedAgainNextTime() async {
+        await openHub()
+        await eventually { backend.cliUpdateChecks == 1 }
+        #expect(model.footer?.agentio == .version("3.14.0"))
+        backend.cliUpdateResult = .success(CliUpdate(current: "3.14.0", latest: "3.17.1", updateAvailable: true))
+        await model.switchVault()
+        await openHub()
+        await eventually { model.footer?.agentio == .updateAvailable(current: "3.14.0", latest: "3.17.1") }
+    }
+
+    @Test func anAnswerAboutAnotherVersionIsIgnored() async {
+        backend.cliUpdateResult = .success(CliUpdate(current: "3.13.0", latest: "3.17.1", updateAvailable: true))
+        await openHub()
+        await eventually { backend.cliUpdateChecks == 1 }
+        try? await Task.sleep(for: .milliseconds(20))
+        #expect(model.footer?.agentio == .version("3.14.0"))
+    }
+
+    @Test func updatingInstallsShowsProgressAndChecksTheNewVersion() async {
+        backend.cliUpdateResult = .success(CliUpdate(current: "3.14.0", latest: "3.17.1", updateAvailable: true))
+        await openHub()
+        await eventually { model.footer?.agentio == .updateAvailable(current: "3.14.0", latest: "3.17.1") }
+        backend.installGate = true
+        backend.installEvents = [.percent(50)]
+        backend.installResult = .success(CliInfo(path: installed.path, version: "3.17.1"))
+        let update = Task { await model.updateAgentio() }
+        await eventually { model.footer?.agentio == .updating(percent: 45) }
+        #expect(model.screen == .vault)  // the page stays
+        await model.updateAgentio()  // a second click while it runs installs nothing more
+        backend.cliUpdateResult = .success(CliUpdate(current: "3.17.1", latest: "3.17.1", updateAvailable: false))
+        backend.openInstallGate()
+        await update.value
+        #expect(model.footer?.agentio == .upToDate("3.17.1"))
+        #expect(backend.installs.count == 1)
+        #expect(backend.cliUpdateChecks == 2)
+    }
+
+    @Test func aFailedUpdateOffersToTryAgain() async {
+        backend.cliUpdateResult = .success(CliUpdate(current: "3.14.0", latest: "3.17.1", updateAvailable: true))
+        await openHub()
+        await eventually { model.footer?.agentio == .updateAvailable(current: "3.14.0", latest: "3.17.1") }
+        backend.installResult = .failure(AgentioError("The installer exited with code 1: no network"))
+        await model.updateAgentio()
+        #expect(model.footer?.agentio == .updateFailed(current: "3.14.0", latest: "3.17.1"))
+        #expect(model.screen == .vault)
+        backend.installResult = .success(CliInfo(path: installed.path, version: "3.17.1"))
+        await model.updateAgentio()
+        #expect(backend.installs.count == 2)
+        #expect(model.footer?.agentio == .version("3.17.1"))  // the fake still answers about 3.14.0
+    }
+
+    @Test func updatingDoesNothingWithoutANewerRelease() async {
+        await model.updateAgentio()  // no vault page
+        backend.cliUpdateResult = .success(CliUpdate(current: "3.14.0", latest: "3.14.0", updateAvailable: false))
+        await openHub()
+        await eventually { model.footer?.agentio == .upToDate("3.14.0") }
+        await model.updateAgentio()
+        backend.cliUpdateResult = .failure(AgentioError("no network"))
+        await model.switchVault()
+        backend.detected = CliInfo(path: installed.path, version: "3.15.0")
+        await openHub()
+        await eventually { backend.cliUpdateChecks == 2 }
+        await model.updateAgentio()  // version only: nothing to update to
+        #expect(backend.installs.isEmpty)
+    }
+
+    @Test func aSourceFolderIsShownAndNeverCheckedOrUpdated() async {
+        let defaults = UserDefaults(suiteName: "tests-\(UUID().uuidString)")!
+        defaults.set("~/devel/agentio", forKey: CompanionSettings.devAgentioRepoKey)
+        let dev = CompanionModel(backend: backend, settings: CompanionSettings(defaults: defaults), allowLocalHTTP: false,
+                                 deviceName: "d", openURL: { _ in })
+        backend.cliUpdateResult = .success(CliUpdate(current: "3.14.0", latest: "3.17.1", updateAvailable: true))
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await dev.openRemoteVault()
+        #expect(dev.footer?.agentio == .dev(version: "3.14.0", folder: "~/devel/agentio"))
+        await dev.updateAgentio()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(backend.cliUpdateChecks == 0)
+        #expect(backend.installs.isEmpty)
+    }
+
     // MARK: Quitting
 
     @Test func shutdownStopsTheDaemonAndAbandonsTheSignIn() async {

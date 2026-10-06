@@ -12,13 +12,16 @@ public struct RootView: View {
     public var body: some View {
         Group {
             if let page = model.vaultPage {
-                VaultWebView(url: page, canManageProfiles: model.canManageProfiles, notice: model.pageNotice,
-                             onSignInAgain: { perform(model.signInAgain) },
-                             onAddProfile: { model.addProfile(service: $0, displayName: $1) },
-                             onReauth: { model.reauthProfile(service: $0, profile: $1 ?? "", displayName: $2) })
-                    .id(model.canManageProfiles)
-                    .ignoresSafeArea()
-                    .frame(minWidth: 1100, minHeight: 760)
+                VStack(spacing: 0) {
+                    VaultWebView(url: page, canManageProfiles: model.canManageProfiles, notice: model.pageNotice,
+                                 onSignInAgain: { perform(model.signInAgain) },
+                                 onAddProfile: { model.addProfile(service: $0, displayName: $1) },
+                                 onReauth: { model.reauthProfile(service: $0, profile: $1 ?? "", displayName: $2) })
+                        .id(model.canManageProfiles)
+                        .ignoresSafeArea(edges: .top)
+                    if let footer = model.footer { VaultFooter(footer: footer, model: model) }
+                }
+                .frame(minWidth: 1100, minHeight: 760)
                     .sheet(item: Binding(get: { model.addFlow }, set: { if $0 == nil { model.closeAddFlow() } })) { flow in
                         AddProfileSheet(flow: flow, close: model.closeAddFlow)
                     }

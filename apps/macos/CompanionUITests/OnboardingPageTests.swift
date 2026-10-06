@@ -220,32 +220,86 @@ struct OnboardingPageTests {
         #expect(try await sent(by: "document.getElementById('hubNext').click()") == [.signIn(address: "team.example", remember: true)])
     }
 
-    @Test func onlyAPastedHttpsIsRemoved() async throws {
+    @Test func aTypedSchemeMovesToThePrefix() async throws {
         try await render(state("hub"))
         let type = { (value: String) in
             "const f = document.getElementById('hubInput'); f.value = '\(value)'; f.dispatchEvent(new Event('input'))"
         }
+        let field = "document.getElementById('hubInput').value"
+        let prefix = "document.getElementById('hubScheme').textContent"
+        #expect(try await string(prefix) == "https://")
         _ = try await js(type("https://team.example"))
-        #expect(try await string("document.getElementById('hubInput').value") == "team.example")
+        #expect(try await string(field) == "team.example")
+        #expect(try await string(prefix) == "https://")
+        _ = try await js(type(" HTTP://127.0.0.1:1234"))
+        #expect(try await string(field) == "127.0.0.1:1234")
+        #expect(try await string(prefix) == "http://")
+        // The scheme stays while the field has an address; an empty field goes back to https://.
+        _ = try await js(type("127.0.0.1:5678"))
+        #expect(try await string(prefix) == "http://")
+        _ = try await js(type(" "))
+        #expect(try await string(prefix) == "https://")
         _ = try await js(type("HTTPS://team.example"))
-        #expect(try await string("document.getElementById('hubInput').value") == "team.example")
-        _ = try await js(type("http://127.0.0.1:1234"))
-        #expect(try await string("document.getElementById('hubInput').value") == "http://127.0.0.1:1234")
+        #expect(try await string(field) == "team.example")
+        #expect(try await string(prefix) == "https://")
+        // Only a scheme at the start counts; the rest is a path, cut off.
+        _ = try await js(type("team.example/http://x"))
+        #expect(try await string(field) == "team.example")
+        #expect(try await string(prefix) == "https://")
+    }
+
+    @Test func aPastedPageAddressIsCleanedToTheHub() async throws {
+        try await render(state("hub"))
+        let paste = { (value: String) in
+            "const f = document.getElementById('hubInput'); f.value = '\(value)'; f.dispatchEvent(new Event('input'))"
+        }
+        let field = "document.getElementById('hubInput').value"
+        let prefix = "document.getElementById('hubScheme').textContent"
+        for (pasted, host, scheme) in [
+            ("https://agentio.chuut.com/ui/profiles?tab=gmail#top", "agentio.chuut.com", "https://"),
+            ("  http://127.0.0.1:7931/ui/", "127.0.0.1:7931", "http://"),
+            ("team.example:8443/", "team.example:8443", "https://"),
+            ("team.example?x=1", "team.example", "https://"),
+            ("team.example#a", "team.example", "https://"),
+        ] {
+            _ = try await js(paste(""))
+            _ = try await js(paste(pasted))
+            #expect(try await string(field) == host, "pasted: \(pasted)")
+            #expect(try await string(prefix) == scheme, "pasted: \(pasted)")
+        }
+        // The cleaned address is the one checked, and Connect accepts the hub found for it.
+        _ = try await js(paste(""))
+        _ = try await js(paste("https://agentio.chuut.com/ui/profiles"))
+        try await waitFor { messages.actions.last == .checkHub("agentio.chuut.com") }
+        try await render(state("hub") { $0.hubCheck = .init(state: "found", hub: "https://agentio.chuut.com", version: "3.17.1") })
+        #expect(try await bool("document.getElementById('hubNext').disabled") == false)
+    }
+
+    @Test func aRememberedHttpHubShowsItsSchemeOnce() async throws {
+        try await render(state("hub") { $0.hubAddress = "http://127.0.0.1:7931" })
+        try await waitFor { messages.actions.count >= 1 }
+        #expect(messages.actions == [.checkHub("http://127.0.0.1:7931")])
+        #expect(try await string("document.getElementById('hubInput').value") == "127.0.0.1:7931")
+        #expect(try await string("document.getElementById('hubScheme').textContent") == "http://")
     }
 
     @Test func aLocalHttpHubCanBeReached() async throws {
         let found = OnboardingState.Check(state: "found", hub: "http://127.0.0.1:1234", version: "3.17.0")
+        let type = { (value: String) in
+            "const f = document.getElementById('hubInput'); f.value = '\(value)'; f.dispatchEvent(new Event('input'))"
+        }
         try await render(state("hub"))
-        _ = try await js("const f = document.getElementById('hubInput'); f.value = 'http://127.0.0.1:1234'; f.dispatchEvent(new Event('input'))")
+        _ = try await js(type("http://127.0.0.1:1234"))
         try await render(state("hub") { $0.hubCheck = found })
         #expect(try await bool("document.getElementById('hubNext').disabled") == false)
         #expect(try await sent(by: "document.getElementById('hubNext').click()").filter { $0 != .checkHub("http://127.0.0.1:1234") }
             == [.signIn(address: "http://127.0.0.1:1234", remember: true)])
-        // The same host without the scheme is another address (https://), so not the one found.
-        _ = try await js("const f = document.getElementById('hubInput'); f.value = '127.0.0.1:1234'; f.dispatchEvent(new Event('input'))")
+        // The same host typed again after clearing the field is an https:// address, so not the one found.
+        _ = try await js(type(""))
+        _ = try await js(type("127.0.0.1:1234"))
         #expect(try await bool("document.getElementById('hubNext').disabled") == true)
         // And an https hub found does not match a field typed with http://.
-        _ = try await js("const f = document.getElementById('hubInput'); f.value = 'http://team.example'; f.dispatchEvent(new Event('input'))")
+        _ = try await js(type("http://team.example"))
         try await render(state("hub") { $0.hubCheck = .init(state: "found", hub: "team.example", version: "3.17.0") })
         #expect(try await bool("document.getElementById('hubNext').disabled") == true)
     }

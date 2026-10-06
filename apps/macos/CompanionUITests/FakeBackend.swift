@@ -29,6 +29,8 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     private var _initVaultGate = false
     private var _daemons: [FakeDaemon] = []
     private var _daemonError: AgentioError?
+    private var _cliUpdate: Result<CliUpdate, AgentioError> = .failure(AgentioError("no network"))
+    private var _cliUpdateChecks = 0
 
     private var _describe: Result<SetupNeeds?, AgentioError> = .success(SetupNeeds(inputs: [], auth: .browser))
     private var _describeGated = false
@@ -66,6 +68,9 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     var initVaultGate: Bool { get { locked { _initVaultGate } } set { locked { _initVaultGate = newValue } } }
     var daemons: [FakeDaemon] { locked { _daemons } }
     var daemonError: AgentioError? { get { locked { _daemonError } } set { locked { _daemonError = newValue } } }
+    /// What `checkCliUpdate` answers; it cannot say unless a test sets it.
+    var cliUpdateResult: Result<CliUpdate, AgentioError> { get { locked { _cliUpdate } } set { locked { _cliUpdate = newValue } } }
+    var cliUpdateChecks: Int { locked { _cliUpdateChecks } }
 
     var describeResult: Result<SetupNeeds?, AgentioError> { get { locked { _describe } } set { locked { _describe = newValue } } }
     /// Each started add: "service|k=v,k=v|readOnly".
@@ -121,6 +126,11 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
         let info = try installResult.get()
         detected = info
         return info
+    }
+
+    func checkCliUpdate() async throws -> CliUpdate {
+        locked { _cliUpdateChecks += 1 }
+        return try cliUpdateResult.get()
     }
 
     func hubVersion(_ hub: String) async throws -> CliVersion {
