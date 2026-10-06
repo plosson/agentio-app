@@ -77,6 +77,7 @@ extension AgentioCLI {
         fetchScript: @Sendable () async throws -> Data = fetchOfficialInstaller,
         onProgress: @escaping @Sendable (InstallProgress) -> Void
     ) async throws -> CliInfo {
+        if let dev { throw dev.cannotInstall(atLeast: minimum) }
         let files = FileManager.default
         try files.createDirectory(at: location.binDir, withIntermediateDirectories: true)
         try files.createDirectory(at: location.homeDir, withIntermediateDirectories: true,

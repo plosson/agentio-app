@@ -112,6 +112,8 @@ public final class CompanionModel {
     private var pendingPage: String?
     /// Loading the add sheet; stopped with the sheet.
     private var addFlowStart: Task<Void, Never>?
+    /// Whether the app runs a developer's checkout (`devAgentioRepo`), as read at launch.
+    private let devAgentio: Bool
 
     public init(backend: any CompanionBackend, settings: CompanionSettings, allowLocalHTTP: Bool, deviceName: String,
                 openURL: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) },
@@ -126,11 +128,13 @@ public final class CompanionModel {
         self.allowLocalHTTP = allowLocalHTTP
         self.deviceName = deviceName
         if let remembered = settings.rememberedHubURL { hubURL = remembered }
+        devAgentio = settings.devAgentioRepo != nil
     }
 
     public var windowTitle: String {
-        guard let host = vaultPage?.host() else { return "AgentIO Companion" }
-        return "AgentIO Companion — \(host)\(vaultPage?.port.map { ":\($0)" } ?? "")"
+        let dev = devAgentio ? " (dev AgentIO)" : ""
+        guard let host = vaultPage?.host() else { return "AgentIO Companion\(dev)" }
+        return "AgentIO Companion — \(host)\(vaultPage?.port.map { ":\($0)" } ?? "")\(dev)"
     }
 
     /// Start the CLI download if the app's CLI is missing or too old, then show the mode screen.

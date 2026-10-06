@@ -508,6 +508,21 @@ struct CompanionModelTests {
         #expect(model.windowTitle == "AgentIO Companion — h.example")
     }
 
+    @Test func theTitleSaysWhenTheAppRunsADevCheckoutFromLaunch() async {
+        let defaults = UserDefaults(suiteName: "tests-\(UUID().uuidString)")!
+        defaults.set("/src/agentio", forKey: CompanionSettings.devAgentioRepoKey)
+        let dev = CompanionModel(backend: backend, settings: CompanionSettings(defaults: defaults), allowLocalHTTP: false,
+                                 deviceName: "d", openURL: { _ in })
+        #expect(dev.windowTitle == "AgentIO Companion (dev AgentIO)")
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: false))
+        await dev.openRemoteVault()
+        #expect(dev.windowTitle == "AgentIO Companion — h.example (dev AgentIO)")
+        // The CLI is chosen at launch: removing the setting changes nothing until the app restarts.
+        defaults.removeObject(forKey: CompanionSettings.devAgentioRepoKey)
+        #expect(dev.windowTitle == "AgentIO Companion — h.example (dev AgentIO)")
+        #expect(model.windowTitle == "AgentIO Companion")
+    }
+
     @Test func signInAgainFromTheHubPageSkipsTheCelebration() async {
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: false))
         await model.openRemoteVault()
