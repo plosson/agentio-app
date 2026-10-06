@@ -519,11 +519,11 @@ struct OnboardingWebViewTests {
     let received = ReceivedActions()
 
     /// A web view whose handler was made for the bundled page, as `makeNSView` does.
-    private func webView(loading load: (WKWebView) -> Void) async throws -> WKWebView {
+    private func webView(forPage page: URL = onboardingPageURL, loading load: (WKWebView) -> Void) async throws -> WKWebView {
         let configuration = WKWebViewConfiguration()
         let received = received
         configuration.userContentController.add(
-            OnboardingMessageHandler(pageURL: onboardingPageURL) { received.actions.append($0) },
+            OnboardingMessageHandler(pageURL: page) { received.actions.append($0) },
             name: "agentioOnboarding")
         let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 720, height: 640), configuration: configuration)
         load(webView)
@@ -555,6 +555,21 @@ struct OnboardingWebViewTests {
             "window.webkit.messageHandlers.agentioOnboarding.postMessage({action: 'dragWindow', args: []})",
             contentWorld: .page)
         try await poll { received.actions.contains(.dragWindow) }
+    }
+
+    @Test func aPageInAFolderWithASpaceIsHeard() async throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appending(path: "\(UUID().uuidString)/With Space.app/Contents/Resources", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()) }
+        let page = folder.appending(path: "onboarding.html")
+        try FileManager.default.copyItem(at: onboardingPageURL, to: page)
+        let webView = try await webView(forPage: page) {
+            $0.loadFileURL(page, allowingReadAccessTo: folder)
+        }
+        #expect(webView.url?.path.contains("With Space.app") == true)
+        try await post(open, in: webView)
+        #expect(received.actions == [.openWebsite, .dragWindow])
     }
 
     @Test func aPageFromAnotherAddressIsNotHeard() async throws {
@@ -620,9 +635,21 @@ struct OnboardingWebViewTests {
         try await settle(webView)
         #expect(webView.url?.standardizedFileURL == onboardingPageURL.standardizedFileURL)
 
-        _ = try await webView.callAsyncJavaScript("location.href = 'https://example.com'", contentWorld: .page)
-        try await Task.sleep(for: .seconds(1))  // the absence of a navigation: nothing to wait for
-        #expect(webView.url?.standardizedFileURL == onboardingPageURL.standardizedFileURL)
+        // Another local page: it loads without a network, so a missing block moves the web view at once.
+        let other = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).html")
+        try "<p>elsewhere</p>".write(to: other, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: other) }
+        webView.loadFileURL(other, allowingReadAccessTo: other.deletingLastPathComponent())
+        // Waits up to a second for a move that must not happen; the other page, if it loads, ends the wait.
+        var moved = false
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(1)
+        while !moved, clock.now < deadline {
+            moved = try await webView.evaluateJavaScript("document.body.textContent.includes('elsewhere')") as? Bool == true
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!moved)
+        #expect(try await webView.evaluateJavaScript("typeof window.agentioOnboarding") as? String == "object")
         OnboardingWebView.dismantleNSView(webView, coordinator: coordinator)
     }
 }

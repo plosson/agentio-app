@@ -277,17 +277,17 @@ struct OnboardingStateTests {
         // Each async step does something synchronously before its first await
         // (signIn: busy, hubURL; checkHub: hubCheck; createVault: error), so a
         // missing guard shows after one yield.
-        perform(.signIn(address: "h.example", remember: true), on: model, webView: nil)
-        perform(.checkHub("h.example"), on: model, webView: nil)
-        perform(.createVault(passphrase: "short", again: "short"), on: model, webView: nil)
-        perform(.openVault, on: model, webView: nil)
-        perform(.openApproval, on: model, webView: nil)
-        perform(.copyApprovalLink, on: model, webView: nil)
-        perform(.cancelSignIn, on: model, webView: nil)
-        perform(.openExistingVault, on: model, webView: nil)
-        perform(.useAnotherVault, on: model, webView: nil)
-        perform(.retryDownload, on: model, webView: nil)
-        perform(.back, on: model, webView: nil)
+        OnboardingAction.signIn(address: "h.example", remember: true).perform(on: model, webView: nil)
+        OnboardingAction.checkHub("h.example").perform(on: model, webView: nil)
+        OnboardingAction.createVault(passphrase: "short", again: "short").perform(on: model, webView: nil)
+        OnboardingAction.openVault.perform(on: model, webView: nil)
+        OnboardingAction.openApproval.perform(on: model, webView: nil)
+        OnboardingAction.copyApprovalLink.perform(on: model, webView: nil)
+        OnboardingAction.cancelSignIn.perform(on: model, webView: nil)
+        OnboardingAction.openExistingVault.perform(on: model, webView: nil)
+        OnboardingAction.useAnotherVault.perform(on: model, webView: nil)
+        OnboardingAction.retryDownload.perform(on: model, webView: nil)
+        OnboardingAction.back.perform(on: model, webView: nil)
         await Task.yield()
         await Task.yield()
         #expect(model.busy == nil)
@@ -306,35 +306,59 @@ struct OnboardingStateTests {
         await model.start()
         model.goRemote()
         backend.hubVersionGates = ["https://h.example"]
-        perform(.signIn(address: "h.example", remember: true), on: model, webView: nil)
+        OnboardingAction.signIn(address: "h.example", remember: true).perform(on: model, webView: nil)
         await eventually { model.busy != nil }
         #expect(onboardingState(of: model).busy == "Checking the hub…")
-        perform(.signIn(address: "h.example", remember: true), on: model, webView: nil)
-        perform(.back, on: model, webView: nil)
-        perform(.chooseLocal, on: model, webView: nil)
+        OnboardingAction.signIn(address: "h.example", remember: true).perform(on: model, webView: nil)
+        OnboardingAction.back.perform(on: model, webView: nil)
+        OnboardingAction.chooseLocal.perform(on: model, webView: nil)
         await Task.yield()
         await Task.yield()
         #expect(screen == "hub")  // back did not reset the screen
         #expect(backend.hubChecks.count == 1)  // one sign-in, not two
         // checkHub and cancelSignIn still work while busy.
-        perform(.checkHub(""), on: model, webView: nil)
+        OnboardingAction.checkHub("").perform(on: model, webView: nil)
         #expect(onboardingState(of: model).hubCheck.state == "idle")
         backend.loginCode = code
         backend.openHubVersionGate("https://h.example")
         await eventually { screen == "approve" }
         #expect(backend.logins.count == 1)
-        perform(.cancelSignIn, on: model, webView: nil)
+        OnboardingAction.cancelSignIn.perform(on: model, webView: nil)
         await eventually { screen == "hub" && model.error != nil }
+    }
+
+    @Test func openingALocalVaultIsBusyWhileTheCliDownloads() async {
+        backend.vaultStateResult = .success(.local)
+        await model.start()
+        backend.detected = nil
+        backend.installGate = true
+        OnboardingAction.openExistingVault.perform(on: model, webView: nil)
+        await eventually { model.screen == .installing }
+        #expect(model.busy == "Starting the local vault…")  // a second click is refused from the first moment
+        OnboardingAction.openExistingVault.perform(on: model, webView: nil)
+        backend.openInstallGate()
+        await eventually { model.screen == .vault }
+        #expect(backend.daemons.count == 1)
+    }
+
+    @Test func aDoubleClickedCreateWhileTheCliIsCheckedRunsOneInitVault() async {
+        await model.start()
+        model.goLocal()
+        OnboardingAction.createVault(passphrase: "correct horse", again: "correct horse").perform(on: model, webView: nil)
+        await Task.yield()
+        OnboardingAction.createVault(passphrase: "correct horse", again: "correct horse").perform(on: model, webView: nil)
+        await eventually { screen == "done" }
+        #expect(backend.passphrases.count == 1)
     }
 
     @Test func aDoublePressedCreateRunsOneInitVault() async {
         await model.start()
         model.goLocal()
         backend.initVaultGate = true
-        perform(.createVault(passphrase: "correct horse", again: "correct horse"), on: model, webView: nil)
+        OnboardingAction.createVault(passphrase: "correct horse", again: "correct horse").perform(on: model, webView: nil)
         await eventually { backend.passphrases.count == 1 && model.busy != nil }
-        perform(.createVault(passphrase: "correct horse", again: "correct horse"), on: model, webView: nil)
-        perform(.back, on: model, webView: nil)
+        OnboardingAction.createVault(passphrase: "correct horse", again: "correct horse").perform(on: model, webView: nil)
+        OnboardingAction.back.perform(on: model, webView: nil)
         await Task.yield()
         await Task.yield()
         #expect(screen == "local")
@@ -345,50 +369,50 @@ struct OnboardingStateTests {
 
     @Test func openingAVaultFromWelcomeOpensNothing() async {
         await model.start()
-        perform(.openVault, on: model, webView: nil)
+        OnboardingAction.openVault.perform(on: model, webView: nil)
         #expect(model.screen == .mode)
         #expect(model.vaultPage == nil)
     }
 
     @Test func theWelcomeButtonsMoveOn() async {
         await model.start()
-        perform(.chooseHub, on: model, webView: nil)
+        OnboardingAction.chooseHub.perform(on: model, webView: nil)
         #expect(screen == "hub")
-        perform(.chooseLocal, on: model, webView: nil)  // not on welcome any more
+        OnboardingAction.chooseLocal.perform(on: model, webView: nil)  // not on welcome any more
         #expect(screen == "hub")
-        perform(.back, on: model, webView: nil)
+        OnboardingAction.back.perform(on: model, webView: nil)
         await eventually { screen == "welcome" }
-        perform(.chooseLocal, on: model, webView: nil)
+        OnboardingAction.chooseLocal.perform(on: model, webView: nil)
         #expect(screen == "local")
     }
 
     @Test func theHubScreenChecksAndSignsIn() async {
         await model.start()
         model.goRemote()
-        perform(.checkHub("h.example"), on: model, webView: nil)
+        OnboardingAction.checkHub("h.example").perform(on: model, webView: nil)
         await eventually { onboardingState(of: model).hubCheck.state == "found" }
         backend.loginCode = code
-        perform(.signIn(address: "h.example", remember: false), on: model, webView: nil)
+        OnboardingAction.signIn(address: "h.example", remember: false).perform(on: model, webView: nil)
         await eventually { backend.logins.count == 1 }
         await eventually { screen == "approve" }
-        perform(.cancelSignIn, on: model, webView: nil)
+        OnboardingAction.cancelSignIn.perform(on: model, webView: nil)
         await eventually { screen == "hub" && model.error != nil }
     }
 
     @Test func createVaultOnTheLocalScreenReachesTheBackend() async {
         await model.start()
         model.goLocal()
-        perform(.createVault(passphrase: "correct horse", again: "correct horse"), on: model, webView: nil)
+        OnboardingAction.createVault(passphrase: "correct horse", again: "correct horse").perform(on: model, webView: nil)
         await eventually { backend.passphrases == ["correct horse"] }
         await eventually { screen == "done" }
-        perform(.openVault, on: model, webView: nil)
+        OnboardingAction.openVault.perform(on: model, webView: nil)
         #expect(model.screen == .vault)
     }
 
     @Test func openExistingVaultFollowsTheVaultKind() async {
         backend.vaultStateResult = .success(.local)
         await model.start()
-        perform(.openExistingVault, on: model, webView: nil)
+        OnboardingAction.openExistingVault.perform(on: model, webView: nil)
         await eventually { model.screen == .vault }
         #expect(backend.daemons.count == 1)
     }
@@ -396,7 +420,7 @@ struct OnboardingStateTests {
     @Test func useAnotherVaultGoesToTheHubScreen() async {
         backend.vaultStateResult = .success(.local)
         await model.start()
-        perform(.useAnotherVault, on: model, webView: nil)
+        OnboardingAction.useAnotherVault.perform(on: model, webView: nil)
         #expect(screen == "hub")
     }
 
@@ -409,7 +433,7 @@ struct OnboardingStateTests {
         await model.createLocalVault(passphrase: "correct horse", again: "correct horse")
         #expect(screen == "failed")
         backend.installResult = .success(installed)
-        perform(.retryDownload, on: model, webView: nil)
+        OnboardingAction.retryDownload.perform(on: model, webView: nil)
         #expect(screen == "local")
         await eventually { model.download.phase == .ready }
     }
@@ -419,8 +443,8 @@ struct OnboardingStateTests {
         let m = CompanionModel(backend: backend, settings: settings, allowLocalHTTP: false,
                                deviceName: "d", openURL: { opened.append($0) }, copy: { _ in })
         #expect(onboardingState(of: m).screen == "loading")
-        perform(.openWebsite, on: m, webView: nil)
+        OnboardingAction.openWebsite.perform(on: m, webView: nil)
         #expect(opened == [URL(string: "https://agentio.com")!])
-        perform(.dragWindow, on: m, webView: nil)  // no web view: nothing happens
+        OnboardingAction.dragWindow.perform(on: m, webView: nil)  // no web view: nothing happens
     }
 }

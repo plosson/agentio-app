@@ -40,6 +40,7 @@ private func bareHub(_ hub: String) -> String {
     hub.hasPrefix("https://") ? String(hub.dropFirst("https://".count)) : hub
 }
 
+/// The page's state for `model`'s current screen and steps.
 @MainActor func onboardingState(of model: CompanionModel) -> OnboardingState {
     let screen: String
     var vault: OnboardingState.Vault?
@@ -168,34 +169,34 @@ extension OnboardingAction {
         case .checkHub, .cancelSignIn, .openApproval, .copyApprovalLink, .openWebsite, .dragWindow: false
         }
     }
-}
 
-/// Do what the page asked, on `model`; dragWindow moves `webView`'s window.
-/// An action that doesn't belong to the current screen does nothing, and a
-/// step-starting action does nothing while a step is running (`model.busy`).
-@MainActor func perform(_ action: OnboardingAction, on model: CompanionModel, webView: HubWebView?) {
-    if let screens = action.screens, !screens.contains(onboardingState(of: model).screen) { return }
-    if action.startsStep, model.busy != nil { return }
-    switch action {
-    case .chooseHub, .useAnotherVault: model.goRemote()
-    case .chooseLocal: model.goLocal()
-    case .back: Task { await model.enterMode() }
-    case .checkHub(let address): Task { await model.checkHub(address) }
-    case .signIn(let address, let remember): Task { await model.signIn(url: address, remember: remember) }
-    case .cancelSignIn: model.cancelLogin()
-    case .openApproval: model.openApproval()
-    case .copyApprovalLink: model.copyApprovalLink()
-    case .createVault(let passphrase, let again):
-        Task { await model.createLocalVault(passphrase: passphrase, again: again) }
-    case .openVault: model.openVault()
-    case .openExistingVault:
-        switch model.vault {
-        case .some(.remote): Task { await model.openRemoteVault() }
-        case .some(.local): Task { await model.openLocalVault() }
-        case .some(.none), nil: break
+    /// Do what the page asked, on `model`; dragWindow moves `webView`'s window.
+    /// An action that doesn't belong to the current screen does nothing, and a
+    /// step-starting action does nothing while a step is running (`model.busy`).
+    @MainActor func perform(on model: CompanionModel, webView: HubWebView?) {
+        if let screens, !screens.contains(onboardingState(of: model).screen) { return }
+        if startsStep, model.busy != nil { return }
+        switch self {
+        case .chooseHub, .useAnotherVault: model.goRemote()
+        case .chooseLocal: model.goLocal()
+        case .back: Task { await model.enterMode() }
+        case .checkHub(let address): Task { await model.checkHub(address) }
+        case .signIn(let address, let remember): Task { await model.signIn(url: address, remember: remember) }
+        case .cancelSignIn: model.cancelLogin()
+        case .openApproval: model.openApproval()
+        case .copyApprovalLink: model.copyApprovalLink()
+        case .createVault(let passphrase, let again):
+            Task { await model.createLocalVault(passphrase: passphrase, again: again) }
+        case .openVault: model.openVault()
+        case .openExistingVault:
+            switch model.vault {
+            case .some(.remote): Task { await model.openRemoteVault() }
+            case .some(.local): Task { await model.openLocalVault() }
+            case .some(.none), nil: break
+            }
+        case .retryDownload: model.retryDownload()
+        case .openWebsite: model.openWebsite()
+        case .dragWindow: webView?.dragWindow()
         }
-    case .retryDownload: model.retryDownload()
-    case .openWebsite: model.openWebsite()
-    case .dragWindow: webView?.dragWindow()
     }
 }
