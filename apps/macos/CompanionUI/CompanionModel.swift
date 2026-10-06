@@ -27,7 +27,8 @@ public enum Screen: Equatable, Sendable {
 public struct PageNotice: Equatable, Sendable {
     public let id: UUID
     public let service: String
-    public let profile: String
+    /// Nil when the app cannot know it (added in a terminal).
+    public let profile: String?
 }
 
 /// What the hub-address field says about the address typed so far.
@@ -84,6 +85,8 @@ public final class CompanionModel {
 
     /// The add-profile (or sign-in-again) sheet; nil when none is open.
     public private(set) var addFlow: AddProfileFlow?
+    /// The add-in-a-terminal sheet; nil when none is open.
+    public private(set) var terminalFlow: TerminalFlow?
     /// The last profile added, for the page to pick up.
     public private(set) var pageNotice: PageNotice?
 
@@ -494,6 +497,7 @@ public final class CompanionModel {
     /// Back to the app's own screens (the local daemon, if any, keeps running).
     public func switchVault() async {
         closeAddFlow()
+        closeTerminalFlow()
         vaultPage = nil
         await enterMode()
     }
@@ -502,6 +506,7 @@ public final class CompanionModel {
     /// the same hub again, from the app's own screens. Only for a remote vault.
     public func signInAgain() async {
         closeAddFlow()
+        closeTerminalFlow()
         guard screen == .vault, hubURL != daemon?.url.absoluteString else { return }
         vaultPage = nil
         screen = .hubURL
@@ -513,7 +518,13 @@ public final class CompanionModel {
     /// The hub page asked to add `service`. Only on an open remote vault whose key may manage profiles,
     /// and one at a time.
     public func addProfile(service: String, displayName: String?) {
-        openFlow(service: service, displayName: displayName ?? service, purpose: .add)
+        guard settings.setupMode == .terminal else {
+            return openFlow(service: service, displayName: displayName ?? service, purpose: .add)
+        }
+        guard canOpenSheet else { return }
+        terminalFlow = TerminalFlow(service: service, displayName: displayName ?? service, backend: backend) { [weak self] service in
+            self?.pageNotice = PageNotice(id: UUID(), service: service, profile: nil)
+        }
     }
 
     /// The hub page asked to sign `profile` of `service` in again. Same conditions as `addProfile`,
@@ -524,13 +535,18 @@ public final class CompanionModel {
     }
 
     private func openFlow(service: String, displayName: String, purpose: AddProfileFlow.Purpose) {
-        guard screen == .vault, hubURL != daemon?.url.absoluteString, canManageProfiles == true, addFlow == nil else { return }
+        guard canOpenSheet else { return }
         let flow = AddProfileFlow(service: service, displayName: displayName, purpose: purpose, backend: backend,
                                   openURL: openURL) { [weak self] service, profile in
             self?.pageNotice = PageNotice(id: UUID(), service: service, profile: profile)
         }
         addFlow = flow
         addFlowStart = Task { await flow.start() }
+    }
+
+    /// One sheet at a time, only on an open remote vault whose key may manage profiles.
+    private var canOpenSheet: Bool {
+        screen == .vault && hubURL != daemon?.url.absoluteString && canManageProfiles == true && addFlow == nil && terminalFlow == nil
     }
 
     /// Close the sheet; an add still running is stopped.
@@ -541,10 +557,17 @@ public final class CompanionModel {
         addFlow = nil
     }
 
+    /// Close the terminal sheet; the sheet's view stops the process.
+    public func closeTerminalFlow() {
+        terminalFlow?.cancel()
+        terminalFlow = nil
+    }
+
     /// Before quitting: no sign-in left polling the hub, no download left
     /// running, no daemon left running.
     public func shutdown() async {
         closeAddFlow()
+        closeTerminalFlow()
         abandonLogin()
         downloadTask?.cancel()
         await daemon?.stop()

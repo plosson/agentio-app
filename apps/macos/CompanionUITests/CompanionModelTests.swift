@@ -34,6 +34,84 @@ struct CompanionModelTests {
         #expect(model.addFlow === first)
     }
 
+    @Test func terminalModeOpensTheTerminalSheetUnderTheSameGate() async {
+        settings.setupMode = .terminal
+        model.addProfile(service: "gcal", displayName: "Google Calendar")
+        #expect(model.terminalFlow == nil)
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.openRemoteVault()
+        model.addProfile(service: "gcal", displayName: "Google Calendar")
+        #expect(model.terminalFlow?.service == "gcal")
+        #expect(model.addFlow == nil)
+        // One sheet at a time, whatever the mode.
+        let first = model.terminalFlow
+        settings.setupMode = .form
+        model.addProfile(service: "gmail", displayName: "Gmail")
+        #expect(model.terminalFlow === first)
+        #expect(model.addFlow == nil)
+    }
+
+    @Test func theFormBlocksATerminalSheetToo() async {
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.openRemoteVault()
+        model.addProfile(service: "kite", displayName: "Kite")
+        settings.setupMode = .terminal
+        model.addProfile(service: "gcal", displayName: "Google Calendar")
+        #expect(model.addFlow?.service == "kite")
+        #expect(model.terminalFlow == nil)
+    }
+
+    @Test func signingInAgainKeepsTheFormInTerminalMode() async {
+        settings.setupMode = .terminal
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.openRemoteVault()
+        model.reauthProfile(service: "gcal", profile: "pa@example.com")
+        #expect(model.addFlow != nil)
+        #expect(model.terminalFlow == nil)
+    }
+
+    @Test func aTerminalAddTellsThePageWithoutAProfile() async {
+        settings.setupMode = .terminal
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.openRemoteVault()
+        model.addProfile(service: "gcal", displayName: nil)
+        #expect(model.terminalFlow?.displayName == "gcal")
+        model.terminalFlow?.start()
+        model.terminalFlow?.exited(0)
+        #expect(model.pageNotice?.service == "gcal")
+        #expect(model.pageNotice?.profile == nil)
+    }
+
+    @Test func switchingVaultCancelsTheTerminalAndClosesTheSheet() async throws {
+        settings.setupMode = .terminal
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.openRemoteVault()
+        model.addProfile(service: "gcal", displayName: nil)
+        let flow = try #require(model.terminalFlow)
+        flow.start()
+        await model.switchVault()
+        #expect(flow.isCancelled)
+        #expect(model.terminalFlow == nil)
+        flow.exited(0)
+        #expect(model.pageNotice == nil)
+    }
+
+    @Test func closingTheTerminalSheetCancelsItsFlow() async throws {
+        settings.setupMode = .terminal
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.openRemoteVault()
+        model.addProfile(service: "gcal", displayName: nil)
+        let flow = try #require(model.terminalFlow)
+        flow.start()
+        model.closeTerminalFlow()
+        #expect(flow.isCancelled)
+        #expect(model.terminalFlow == nil)
+        // A new sheet can open after it.
+        model.addProfile(service: "gcal", displayName: nil)
+        #expect(model.terminalFlow != nil)
+        #expect(model.terminalFlow !== flow)
+    }
+
     @Test func anAddedProfileIsANoticeForThePage() async throws {
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
         await model.openRemoteVault()

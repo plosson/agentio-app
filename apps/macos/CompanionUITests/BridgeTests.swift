@@ -90,6 +90,13 @@ struct BridgeScriptTests {
         #expect(got as? String == #"[{"service":"gmail","profile":"a\"b'c</script><b>@x"}]"#)
     }
 
+    @Test func theProfilesChangedEventWithoutAProfileSendsNull() async throws {
+        let webView = try await page("<html><body><script>window.got = []; window.addEventListener('agentio:profiles-changed', (e) => window.got.push(e.detail));</script></body></html>", log: CallLog())
+        _ = try await webView.evaluateJavaScript(profilesChangedScript(PageNotice(id: UUID(), service: "gcal", profile: nil)))
+        let got = try await webView.callAsyncJavaScript("return JSON.stringify(window.got)", contentWorld: .page)
+        #expect(got as? String == #"[{"service":"gcal","profile":null}]"#)
+    }
+
     @Test func malformedCallsRejectAndDoNothing() async throws {
         let log = CallLog()
         let webView = try await page("<html><body>hub</body></html>", log: log)

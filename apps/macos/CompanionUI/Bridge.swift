@@ -126,14 +126,16 @@ final class BridgeHandler: NSObject, WKScriptMessageHandlerWithReply {
 
 private let bridgeLog = Logger(subsystem: "com.plosson.agentio-companion", category: "bridge")
 
-/// The script that tells the hub page a profile was added. The detail is JSON, so any name is safe.
+/// The script that tells the hub page a profile was added. The detail is JSON, so any name is safe;
+/// without a name (a terminal add) it is null, and the page shows its profile list.
 func profilesChangedScript(_ notice: PageNotice) -> String {
     // Each value is a JSON string literal (it escapes `/`, so `</script>` is inert); the key order is fixed.
     func literal(_ text: String) -> String {
         let data = try? JSONSerialization.data(withJSONObject: text, options: [.fragmentsAllowed])
         return data.map { String(decoding: $0, as: UTF8.self) } ?? "\"\""
     }
-    return "window.dispatchEvent(new CustomEvent('agentio:profiles-changed', { detail: { service: \(literal(notice.service)), profile: \(literal(notice.profile)) } }));"
+    let profile = notice.profile.map(literal) ?? "null"
+    return "window.dispatchEvent(new CustomEvent('agentio:profiles-changed', { detail: { service: \(literal(notice.service)), profile: \(profile) } }));"
 }
 
 /// The bridge's actions, for the page in `webView`. The terminal action

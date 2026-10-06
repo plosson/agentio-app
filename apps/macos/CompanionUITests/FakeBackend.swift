@@ -35,6 +35,7 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     private var _startedAdds: [String] = []
     private var _addRuns: [FakeAddRun] = []
     private var _startedReauths: [String] = []
+    private var _terminalAdds: [String] = []
 
     private func locked<T>(_ body: () -> T) -> T { lock.withLock(body) }
 
@@ -99,6 +100,15 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
             _addRuns.append(run)
         }
         return run
+    }
+
+    var terminalAdds: [String] { locked { _terminalAdds } }
+
+    func terminalProfileAdd(_ service: String, readOnly: Bool) throws -> TerminalCommand {
+        locked { _terminalAdds.append("\(service)|\(readOnly)") }
+        guard isServiceID(service) else { throw invalidService(service) }
+        return TerminalCommand(executable: URL(filePath: "/app/bin/agentio"),
+                               arguments: [service, "profile", "add"] + (readOnly ? ["--read-only"] : []), environment: [:])
     }
 
     func detectCli() async -> CliInfo? { detected }
