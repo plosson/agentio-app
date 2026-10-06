@@ -41,8 +41,7 @@ struct OnboardingWebView: NSViewRepresentable {
             configuration.userContentController.add(
                 OnboardingMessageHandler(pageURL: onboardingPageURL) { [weak self] action in
                     guard let self else { return }
-                    // Qualified: NSObject has its own perform(_:).
-                    CompanionUI.perform(action, on: self.model, webView: self.webView)
+                    action.perform(on: self.model, webView: self.webView)
                 },
                 contentWorld: .page, name: "agentioOnboarding")
             let webView = HubWebView(frame: .zero, configuration: configuration)
@@ -73,6 +72,13 @@ struct OnboardingWebView: NSViewRepresentable {
             loaded = true
             lastRendered = nil
             render()
+        }
+
+        /// WebKit's page process died: load the page again, so the window is not left blank.
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            loaded = false
+            lastRendered = nil
+            webView.loadFileURL(onboardingPageURL, allowingReadAccessTo: onboardingPageURL.deletingLastPathComponent())
         }
 
         /// Only the bundled page itself loads; every other navigation is cancelled.
