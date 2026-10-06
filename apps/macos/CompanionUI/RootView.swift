@@ -22,6 +22,9 @@ public struct RootView: View {
                     .sheet(item: Binding(get: { model.addFlow }, set: { if $0 == nil { model.closeAddFlow() } })) { flow in
                         AddProfileSheet(flow: flow, close: model.closeAddFlow)
                     }
+                    .sheet(item: Binding(get: { model.terminalFlow }, set: { if $0 == nil { model.closeTerminalFlow() } })) { flow in
+                        TerminalSheet(flow: flow, close: model.closeTerminalFlow)
+                    }
             } else {
                 OnboardingWebView(state: onboardingState(of: model), model: model)
                     .ignoresSafeArea()
