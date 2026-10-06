@@ -229,7 +229,7 @@ pre.log { margin: 8px 0 0; padding: 10px; border-radius: 8px; background: var(--
       <h1>Where is your hub?</h1>
       <p class="lead">The address of the AgentIO hub you use. Ask whoever runs it if you’re not sure.</p>
       <div class="field">
-        <div class="input"><span class="pre">https://</span><input id="hubInput" placeholder="agentio.example.com" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Hub address"></div>
+        <div class="input"><span class="pre" id="hubScheme">https://</span><input id="hubInput" placeholder="agentio.example.com" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Hub address"></div>
         <div class="check" id="hubCheck" aria-live="polite"><span class="spinner" hidden></span><span class="msg"></span><b></b></div>
         <label class="toggle"><input type="checkbox" id="hubRemember" checked> Remember this address</label>
       </div>
@@ -369,15 +369,33 @@ pre.log { margin: 8px 0 0; padding: 10px; border-radius: 8px; background: var(--
   const mains = [...document.querySelectorAll('[data-main]')];
   mains.forEach((b) => { b.dataset.label = b.querySelector('.label').textContent; });
 
-  /** A hub address as typed, for comparing with the checked one. Only https:// is implied;
+  /** A hub address, for comparing with the checked one. Only https:// is implied;
       an http:// (a local test hub, debug builds) stays part of the address. */
   const bare = (s) => String(s || '').trim().replace(/^https:\/\//i, '').replace(/\/+$/, '').toLowerCase();
+
+  /** The hub field shows only the host (and port): a pasted page address loses its path,
+      query and fragment, and its scheme goes to the prefix: https:// unless an http:// was
+      typed or remembered. An empty field goes back to https://. */
+  let hubScheme = 'https://';
+  function cleanAddress(raw) {
+    const typed = /^\s*(https?:\/\/)/i.exec(raw);
+    if (typed) hubScheme = typed[1].toLowerCase();
+    else if (!raw.trim()) hubScheme = 'https://';
+    text($('hubScheme'), hubScheme);
+    const rest = typed ? raw.slice(typed[0].length) : raw;
+    return rest.replace(/^\s+/, '').split(/[/?#]/)[0];
+  }
+  /** The address to check and sign in to: the field, with its scheme when it is http://. */
+  function hubAddress() {
+    const typed = $('hubInput').value.trim();
+    return typed && hubScheme === 'http://' ? hubScheme + typed : typed;
+  }
 
   function refreshButtons() {
     const s = last || {};
     const busy = typeof s.busy === 'string' && s.busy ? s.busy : null;
     const check = s.hubCheck || {};
-    const hubOK = check.state === 'found' && typeof check.hub === 'string' && check.hub !== '' && bare(check.hub) === bare($('hubInput').value);
+    const hubOK = check.state === 'found' && typeof check.hub === 'string' && check.hub !== '' && bare(check.hub) === bare(hubAddress());
     const passOK = $('pass1').value.length >= 8 && $('pass1').value === $('pass2').value;
     const hasCode = typeof s.code === 'string' && s.code !== '';
     const allowed = { welcomeNext: choice !== null, hubNext: hubOK, localNext: passOK, approveNow: hasCode };
@@ -432,21 +450,21 @@ pre.log { margin: 8px 0 0; padding: 10px; border-radius: 8px; background: var(--
   function enterHub() {
     const s = last;
     $('hubRemember').checked = s.rememberAddress !== false;
-    if (!hubInput.value && typeof s.hubAddress === 'string' && s.hubAddress) hubInput.value = s.hubAddress;
+    if (!hubInput.value && typeof s.hubAddress === 'string' && s.hubAddress) hubInput.value = cleanAddress(s.hubAddress);
     // Prefilled or kept from an earlier visit: check it again (the model's check starts idle).
     clearTimeout(hubTimer);
-    if (hubInput.value.trim()) send('checkHub', hubInput.value.trim());
+    if (hubAddress()) send('checkHub', hubAddress());
     hubInput.focus({ preventScroll: true });
   }
   hubInput.addEventListener('input', () => {
-    const stripped = hubInput.value.replace(/^\s*https:\/\//i, '');
-    if (stripped !== hubInput.value) hubInput.value = stripped;
+    const rest = cleanAddress(hubInput.value);
+    if (rest !== hubInput.value) hubInput.value = rest;
     refreshButtons();
     clearTimeout(hubTimer);
-    hubTimer = setTimeout(() => send('checkHub', hubInput.value.trim()), 500);
+    hubTimer = setTimeout(() => send('checkHub', hubAddress()), 500);
   });
   hubInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !$('hubNext').disabled) $('hubNext').click(); });
-  $('hubNext').addEventListener('click', () => send('signIn', hubInput.value.trim(), $('hubRemember').checked === true));
+  $('hubNext').addEventListener('click', () => send('signIn', hubAddress(), $('hubRemember').checked === true));
   $('hubBack').addEventListener('click', () => send('back'));
   $('website').addEventListener('click', (e) => { e.preventDefault(); send('openWebsite'); });
 
