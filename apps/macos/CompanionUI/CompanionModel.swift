@@ -67,7 +67,7 @@ public final class CompanionModel {
         public var log: [String] = []
     }
     public private(set) var download = DownloadState()
-    /// Shown instead of the actions while a long step runs.
+    /// The running step's message; the page shows it on its main button.
     public private(set) var busy: String?
     /// What the hub-address field says about the address typed so far.
     public private(set) var hubCheck: HubCheck = .idle
@@ -142,8 +142,8 @@ public final class CompanionModel {
     // MARK: CLI (S2)
 
     /// The app's CLI at `minimum` or newer. When it is missing or older, wait
-    /// for the running download, or start one, on the installing screen. False
-    /// when that fails: the screen stays, with the error.
+    /// for the running download, or start one, on the installing screen. True
+    /// puts the screen back where the step began; false leaves it, with the error.
     private func ensureCli(atLeast minimum: CliVersion) async -> Bool {
         if let installed = await backend.detectCli(), installed.isAtLeast(minimum) {
             cli = installed
@@ -153,14 +153,16 @@ public final class CompanionModel {
         screen = .installing
         let running = isDownloading ? downloadTask : nil
         var outcome = await (running ?? startDownload(atLeast: minimum)).value
-        // The launch download only reached the app's minimum; this step needs more.
-        if case .success(let info) = outcome, !info.isAtLeast(minimum) {
+        // A download that was already running may have aimed lower than this step needs.
+        if running != nil, case .success(let info) = outcome, !info.isAtLeast(minimum) {
             outcome = await startDownload(atLeast: minimum).value
         }
         switch outcome {
         case .success(let info) where info.isAtLeast(minimum):
+            if screen == .installing, let from = downloadFrom { screen = from }
             return true
         case .success:
+            download.phase = .failed
             fail(AgentioError("agentio \(minimum) or later could not be installed"))
             return false
         case .failure(let failure):
@@ -417,16 +419,12 @@ public final class CompanionModel {
         guard passphrase == again else {
             return fail(AgentioError("The two passphrases are different"))
         }
-        guard await ensureCli(atLeast: minimumCliVersion) else { return }
-        if screen == .installing { screen = .local }
         busy = "Creating the vault and starting it…"
         defer { busy = nil }
+        guard await ensureCli(atLeast: minimumCliVersion) else { return }
         do {
             try await backend.initVault(passphrase: passphrase)
-            let url = try await runningDaemonURL()
-            hubURL = url.absoluteString
-            canManageProfiles = nil
-            pendingPage = "\(hubURL)/ui"
+            pendingPage = try await localVaultPage()
             finished = .createdLocal
             screen = .done
         } catch {
@@ -436,17 +434,23 @@ public final class CompanionModel {
 
     public func openLocalVault() async {
         error = nil
-        guard await ensureCli(atLeast: minimumCliVersion) else { return }
         busy = "Starting the local vault…"
         defer { busy = nil }
+        guard await ensureCli(atLeast: minimumCliVersion) else { return }
         do {
-            let url = try await runningDaemonURL()
-            hubURL = url.absoluteString
-            canManageProfiles = nil
-            showVault("\(hubURL)/ui")
+            showVault(try await localVaultPage())
         } catch {
             fail(error)
         }
+    }
+
+    /// Start the local daemon (unless this app already runs it), make it the
+    /// current hub, and return its page.
+    private func localVaultPage() async throws -> String {
+        let url = try await runningDaemonURL()
+        hubURL = url.absoluteString
+        canManageProfiles = nil
+        return "\(hubURL)/ui"
     }
 
     /// Start the local daemon, unless this app already runs it.
@@ -537,10 +541,12 @@ public final class CompanionModel {
         addFlow = nil
     }
 
-    /// Before quitting: no sign-in left polling the hub, no daemon left running.
+    /// Before quitting: no sign-in left polling the hub, no download left
+    /// running, no daemon left running.
     public func shutdown() async {
         closeAddFlow()
         abandonLogin()
+        downloadTask?.cancel()
         await daemon?.stop()
         daemon = nil
     }

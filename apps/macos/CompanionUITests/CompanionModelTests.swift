@@ -780,6 +780,53 @@ struct CompanionModelTests {
         #expect(model.error == "The agentio daemon did not start in time")
     }
 
+    @Test func aLocalVaultThatNeededTheDownloadReturnsToItsScreenWhenTheDaemonFails() async {
+        backend.vaultStateResult = .success(.local)
+        await model.start()
+        backend.detected = nil
+        backend.daemonError = AgentioError("The agentio daemon did not start in time")
+        await model.openLocalVault()
+        #expect(backend.installs.count == 1)
+        #expect(model.screen == .mode)
+        #expect(model.error == "The agentio daemon did not start in time")
+        #expect(model.busy == nil)
+    }
+
+    @Test func aCliThatIsStillTooOldAfterTheInstallFailsTheDownloadOnce() async {
+        backend.detected = CliInfo(path: URL(filePath: "/app/bin/agentio"), version: "3.14.0")
+        backend.hubVersionResult = .success(CliVersion("3.20.0")!)
+        await model.signIn(url: "https://h.example", remember: false)
+        #expect(backend.installs.count == 1)  // it started the install itself: no second one at the same minimum
+        #expect(model.download.phase == .failed)
+        #expect(model.screen == .installing)
+        #expect(model.error == "agentio 3.20.0 or later could not be installed")
+    }
+
+    @Test func aDownloadAHigherStepWaitedForIsInstalledOnceMoreWhenItAimedTooLow() async {
+        backend.detected = nil
+        backend.installGate = true
+        await model.start()
+        backend.hubVersionResult = .success(CliVersion("3.20.0")!)
+        let signIn = Task { await model.signIn(url: "https://h.example", remember: false) }
+        await eventually { model.screen == .installing }
+        backend.openInstallGate()
+        await eventually { backend.installs.count == 2 }
+        #expect(backend.installs.last == CliVersion("3.20.0")!)
+        signIn.cancel()
+        await model.shutdown()
+    }
+
+    @Test func quittingDuringTheDownloadCancelsIt() async {
+        backend.detected = nil
+        backend.installGate = true
+        await model.start()
+        await eventually { backend.installs.count == 1 }
+        #expect(model.download.phase == .downloading)
+        await model.shutdown()
+        await eventually { model.download.phase == .failed }  // the gated fake install stops only when cancelled
+        backend.openInstallGate()
+    }
+
     // MARK: Quitting
 
     @Test func shutdownStopsTheDaemonAndAbandonsTheSignIn() async {
