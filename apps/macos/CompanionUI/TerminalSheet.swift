@@ -3,7 +3,7 @@ import AppKit
 @preconcurrency import SwiftTerm
 import SwiftUI
 
-/// Adding one profile in a terminal, over the hub page.
+/// Adding a profile, or signing one in again, in a terminal over the hub page.
 struct TerminalSheet: View {
     @Bindable var flow: TerminalFlow
     let close: () -> Void
@@ -13,7 +13,7 @@ struct TerminalSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Add \(flow.displayName)").font(Theme.title)
+            Text(flow.profile.map { "Sign In to \(flow.displayName) Again: \($0)" } ?? "Add \(flow.displayName)").font(Theme.title)
             if let command {
                 EmbeddedTerminal(command: command, dark: colorScheme == .dark,
                                  onStart: { flow.attach(stop: $0) }, onExit: { flow.exited($0) })
@@ -37,13 +37,15 @@ struct TerminalSheet: View {
     @ViewBuilder private var content: some View {
         switch flow.step {
         case .ready:
-            Explanation("agentio asks its questions in a terminal here. Use the arrow keys to choose and Return to confirm.")
+            Text("agentio asks its questions in a terminal here. Use the arrow keys to choose and Return to confirm.")
+                .foregroundStyle(Theme.textSecondary).fixedSize(horizontal: false, vertical: true)
             Toggle("Read-only: agents can read, not change anything", isOn: $flow.readOnly)
             buttons(primary: ("Start", flow.start), cancel: "Cancel")
         case .running:
             buttons(primary: nil, cancel: "Cancel")
         case .succeeded:
-            Label("\(flow.displayName) added", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.text)
+            Label(flow.profile == nil ? "\(flow.displayName) added" : "Signed in again", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(Theme.text)
             buttons(primary: ("Done", close), cancel: nil)
         case .ended(let code):
             Text(code.map { "agentio stopped with code \($0)." } ?? "agentio was stopped.").foregroundStyle(Theme.danger)

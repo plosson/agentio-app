@@ -22,9 +22,6 @@ public struct RootView: View {
                     if let footer = model.footer { VaultFooter(footer: footer, model: model) }
                 }
                 .frame(minWidth: 1100, minHeight: 760)
-                    .sheet(item: Binding(get: { model.addFlow }, set: { if $0 == nil { model.closeAddFlow() } })) { flow in
-                        AddProfileSheet(flow: flow, close: model.closeAddFlow)
-                    }
                     .sheet(item: Binding(get: { model.terminalFlow }, set: { if $0 == nil { model.closeTerminalFlow() } })) { flow in
                         TerminalSheet(flow: flow, close: model.closeTerminalFlow)
                     }

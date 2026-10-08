@@ -32,12 +32,8 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     private var _cliUpdate: Result<CliUpdate, AgentioError> = .failure(AgentioError("no network"))
     private var _cliUpdateChecks = 0
 
-    private var _describe: Result<SetupNeeds?, AgentioError> = .success(SetupNeeds(inputs: [], auth: .browser))
-    private var _describeGated = false
-    private var _startedAdds: [String] = []
-    private var _addRuns: [FakeAddRun] = []
-    private var _startedReauths: [String] = []
     private var _terminalAdds: [String] = []
+    private var _terminalReauths: [String] = []
 
     private func locked<T>(_ body: () -> T) -> T { lock.withLock(body) }
 
@@ -72,48 +68,23 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
     var cliUpdateResult: Result<CliUpdate, AgentioError> { get { locked { _cliUpdate } } set { locked { _cliUpdate = newValue } } }
     var cliUpdateChecks: Int { locked { _cliUpdateChecks } }
 
-    var describeResult: Result<SetupNeeds?, AgentioError> { get { locked { _describe } } set { locked { _describe = newValue } } }
-    /// Each started add: "service|k=v,k=v|readOnly".
-    var startedAdds: [String] { locked { _startedAdds } }
-    /// Every started run, add or sign-in-again, in order.
-    var addRuns: [FakeAddRun] { locked { _addRuns } }
-    /// Each started sign-in-again: "service|profile".
-    var startedReauths: [String] { locked { _startedReauths } }
-
-    /// While true, `describeSetup` waits (and stops when its task is cancelled).
-    var describeGated: Bool { get { locked { _describeGated } } set { locked { _describeGated = newValue } } }
-
-    func describeSetup(_ service: String) async throws -> SetupNeeds? {
-        while describeGated { try await Task.sleep(for: .milliseconds(10)) }
-        return try describeResult.get()
-    }
-
-    func startProfileAdd(_ service: String, values: [String: String], readOnly: Bool, onEvent: @escaping @Sendable (SetupEvent) -> Void) throws -> any ProfileAddRunning {
-        let sortedValues = values.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
-        let run = FakeAddRun(onEvent: onEvent)
-        locked {
-            _startedAdds.append("\(service)|\(sortedValues)|\(readOnly)")
-            _addRuns.append(run)
-        }
-        return run
-    }
-
-    func startProfileReauth(_ service: String, profile: String, onEvent: @escaping @Sendable (SetupEvent) -> Void) throws -> any ProfileAddRunning {
-        let run = FakeAddRun(onEvent: onEvent)
-        locked {
-            _startedReauths.append("\(service)|\(profile)")
-            _addRuns.append(run)
-        }
-        return run
-    }
-
+    /// Each terminal add: "service|readOnly".
     var terminalAdds: [String] { locked { _terminalAdds } }
+    /// Each terminal sign-in-again: "service|profile".
+    var terminalReauths: [String] { locked { _terminalReauths } }
 
     func terminalProfileAdd(_ service: String, readOnly: Bool) throws -> TerminalCommand {
         locked { _terminalAdds.append("\(service)|\(readOnly)") }
         guard isServiceID(service) else { throw invalidService(service) }
         return TerminalCommand(executable: URL(filePath: "/app/bin/agentio"),
                                arguments: [service, "profile", "add"] + (readOnly ? ["--read-only"] : []), environment: [:])
+    }
+
+    func terminalProfileReauth(_ service: String, profile: String) throws -> TerminalCommand {
+        locked { _terminalReauths.append("\(service)|\(profile)") }
+        guard isServiceID(service) else { throw invalidService(service) }
+        return TerminalCommand(executable: URL(filePath: "/app/bin/agentio"),
+                               arguments: ["profile", "reauth", service, profile], environment: [:])
     }
 
     func detectCli() async -> CliInfo? { detected }
@@ -176,37 +147,6 @@ final class FakeBackend: CompanionBackend, @unchecked Sendable {
         locked { _daemons.append(daemon) }
         return daemon
     }
-}
-
-/// A scripted `profile add --json` run: the test emits events and finishes it.
-final class FakeAddRun: ProfileAddRunning, @unchecked Sendable {
-    private let lock = NSLock()
-    private var _answers: [String] = []
-    private var _cancelled = false
-    private let outcomes: AsyncStream<Result<String, AgentioError>>
-    private let outcome: AsyncStream<Result<String, AgentioError>>.Continuation
-    let onEvent: @Sendable (SetupEvent) -> Void
-
-    init(onEvent: @escaping @Sendable (SetupEvent) -> Void) {
-        self.onEvent = onEvent
-        (outcomes, outcome) = AsyncStream.makeStream()
-    }
-
-    var answers: [String] { lock.withLock { _answers } }
-    var cancelled: Bool { lock.withLock { _cancelled } }
-
-    func answer(id: String, value: String) { lock.withLock { _answers.append("\(id)=\(value)") } }
-    func cancel() {
-        lock.withLock { _cancelled = true }
-        outcome.yield(.failure(AgentioError("Adding the profile was cancelled")))
-    }
-    func finished() async throws -> String {
-        for await result in outcomes { return try result.get() }
-        throw AgentioError("no outcome")
-    }
-
-    func emit(_ event: SetupEvent) { onEvent(event) }
-    func finish(_ result: Result<String, AgentioError>) { outcome.yield(result) }
 }
 
 final class FakeDaemon: LocalDaemon, @unchecked Sendable {

@@ -17,61 +17,36 @@ struct CompanionModelTests {
     // MARK: Adding a profile
 
     @Test func addProfileNeedsAnOpenRemoteVaultWhoseKeyMayManageProfiles() async {
-        model.addProfile(service: "kite", displayName: "Kite")
-        #expect(model.addFlow == nil)
+        model.addProfile(service: "gcal", displayName: "Google Calendar")
+        #expect(model.terminalFlow == nil)
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: false))
         await model.openRemoteVault()
-        model.addProfile(service: "kite", displayName: "Kite")
-        #expect(model.addFlow == nil)
+        model.addProfile(service: "gcal", displayName: "Google Calendar")
+        #expect(model.terminalFlow == nil)
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: nil))
+        await model.switchVault()
+        await model.openRemoteVault()
+        model.addProfile(service: "gcal", displayName: "Google Calendar")
+        #expect(model.terminalFlow == nil)
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
         await model.switchVault()
         await model.openRemoteVault()
-        model.addProfile(service: "kite", displayName: "Kite")
-        #expect(model.addFlow?.service == "kite")
-        // One at a time: a second call while the sheet is open is ignored.
-        let first = model.addFlow
-        model.addProfile(service: "gmail", displayName: "Gmail")
-        #expect(model.addFlow === first)
-    }
-
-    @Test func terminalModeOpensTheTerminalSheetUnderTheSameGate() async {
-        settings.setupMode = .terminal
-        model.addProfile(service: "gcal", displayName: "Google Calendar")
-        #expect(model.terminalFlow == nil)
-        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
-        await model.openRemoteVault()
         model.addProfile(service: "gcal", displayName: "Google Calendar")
         #expect(model.terminalFlow?.service == "gcal")
-        #expect(model.addFlow == nil)
-        // One sheet at a time, whatever the mode.
-        let first = model.terminalFlow
-        settings.setupMode = .form
-        model.addProfile(service: "gmail", displayName: "Gmail")
-        #expect(model.terminalFlow === first)
-        #expect(model.addFlow == nil)
+        #expect(model.terminalFlow?.purpose == .add)
+        // An add waits for its Read-only choice: nothing runs yet.
+        #expect(model.terminalFlow?.step == .ready)
+        #expect(backend.terminalAdds.isEmpty)
     }
 
-    @Test func theFormBlocksATerminalSheetToo() async {
-        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
-        await model.openRemoteVault()
-        model.addProfile(service: "kite", displayName: "Kite")
-        settings.setupMode = .terminal
-        model.addProfile(service: "gcal", displayName: "Google Calendar")
-        #expect(model.addFlow?.service == "kite")
-        #expect(model.terminalFlow == nil)
-    }
-
-    @Test func signingInAgainKeepsTheFormInTerminalMode() async {
-        settings.setupMode = .terminal
-        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
-        await model.openRemoteVault()
-        model.reauthProfile(service: "gcal", profile: "pa@example.com")
-        #expect(model.addFlow != nil)
+    @Test func addOnALocalVaultDoesNothing() async {
+        await model.openLocalVault()
+        #expect(model.screen == .vault)
+        model.addProfile(service: "gcal", displayName: nil)
         #expect(model.terminalFlow == nil)
     }
 
     @Test func aTerminalAddTellsThePageWithoutAProfile() async {
-        settings.setupMode = .terminal
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
         await model.openRemoteVault()
         model.addProfile(service: "gcal", displayName: nil)
@@ -82,8 +57,16 @@ struct CompanionModelTests {
         #expect(model.pageNotice?.profile == nil)
     }
 
+    @Test func aFailedAddIsNoNoticeForThePage() async {
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.openRemoteVault()
+        model.addProfile(service: "gcal", displayName: nil)
+        model.terminalFlow?.start()
+        model.terminalFlow?.exited(1)
+        #expect(model.pageNotice == nil)
+    }
+
     @Test func switchingVaultCancelsTheTerminalAndClosesTheSheet() async throws {
-        settings.setupMode = .terminal
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
         await model.openRemoteVault()
         model.addProfile(service: "gcal", displayName: nil)
@@ -97,7 +80,6 @@ struct CompanionModelTests {
     }
 
     @Test func closingTheTerminalSheetCancelsItsFlow() async throws {
-        settings.setupMode = .terminal
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
         await model.openRemoteVault()
         model.addProfile(service: "gcal", displayName: nil)
@@ -113,7 +95,6 @@ struct CompanionModelTests {
     }
 
     @Test func everyWayOfClosingStopsTheTerminalsProcess() async throws {
-        settings.setupMode = .terminal
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
         let closers: [(String, () async -> Void)] = [
             ("closeTerminalFlow", { model.closeTerminalFlow() }),
@@ -135,95 +116,46 @@ struct CompanionModelTests {
         }
     }
 
-    @Test func anAddedProfileIsANoticeForThePage() async throws {
-        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
-        await model.openRemoteVault()
-        model.addProfile(service: "kite", displayName: nil)
-        #expect(model.addFlow?.displayName == "kite")
-        await eventually { model.addFlow?.step == .form(SetupNeeds(inputs: [], auth: .browser)) }
-        model.addFlow?.submit()
-        try #require(backend.addRuns.first).finish(.success("pa@example.com"))
-        await eventually { model.pageNotice?.profile == "pa@example.com" }
-        #expect(model.pageNotice?.service == "kite")
-    }
-
-    @Test func switchingVaultCancelsAnAddAndClosesTheSheet() async throws {
-        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
-        await model.openRemoteVault()
-        model.addProfile(service: "kite", displayName: "Kite")
-        await eventually { model.addFlow?.step == .form(SetupNeeds(inputs: [], auth: .browser)) }
-        model.addFlow?.submit()
-        let run = try #require(backend.addRuns.first)
-        await model.switchVault()
-        #expect(run.cancelled)
-        #expect(model.addFlow == nil)
-        #expect(model.pageNotice == nil)
-    }
-
-    @Test func quittingDuringAnAddCancelsItAndClosesTheSheet() async throws {
-        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
-        await model.openRemoteVault()
-        model.addProfile(service: "kite", displayName: "Kite")
-        await eventually { model.addFlow?.step == .form(SetupNeeds(inputs: [], auth: .browser)) }
-        model.addFlow?.submit()
-        let run = try #require(backend.addRuns.first)
-        await model.shutdown()
-        #expect(run.cancelled)
-        #expect(model.addFlow == nil)
-    }
-
-    @Test func closingTheSheetWhileItLoadsStopsTheDescribe() async throws {
-        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
-        backend.describeGated = true
-        await model.openRemoteVault()
-        model.addProfile(service: "kite", displayName: "Kite")
-        let flow = try #require(model.addFlow)
-        #expect(flow.step == .loading)
-        try await Task.sleep(for: .milliseconds(50)) // the describe is now waiting on the gate
-        model.closeAddFlow()
-        backend.describeGated = false
-        try await Task.sleep(for: .milliseconds(200))
-        #expect(model.addFlow == nil)
-        #expect(flow.step != .form(SetupNeeds(inputs: [], auth: .browser)))
-        #expect(backend.startedAdds.isEmpty)
-    }
-
     // MARK: Signing a profile in again
 
     @Test func reauthNeedsAnOpenRemoteVaultWhoseKeyMayManageProfiles() async {
         model.reauthProfile(service: "gmail", profile: "work")
-        #expect(model.addFlow == nil)
+        #expect(model.terminalFlow == nil)
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: false))
         await model.openRemoteVault()
         model.reauthProfile(service: "gmail", profile: "work")
-        #expect(model.addFlow == nil)
+        #expect(model.terminalFlow == nil)
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: nil))
         await model.switchVault()
         await model.openRemoteVault()
         model.reauthProfile(service: "gmail", profile: "work")
-        #expect(model.addFlow == nil)
+        #expect(model.terminalFlow == nil)
+        #expect(backend.terminalReauths.isEmpty)
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
         await model.switchVault()
         await model.openRemoteVault()
         model.reauthProfile(service: "gmail", profile: "work")
-        #expect(model.addFlow?.service == "gmail")
-        #expect(model.addFlow?.purpose == .reauth(profile: "work"))
-        #expect(model.addFlow?.step == .confirm)
-        #expect(model.addFlow?.displayName == "gmail")
+        #expect(model.terminalFlow?.service == "gmail")
+        #expect(model.terminalFlow?.purpose == .reauth(profile: "work"))
+        #expect(model.terminalFlow?.displayName == "gmail")
+        // No choice to make: the terminal runs at once.
+        #expect(backend.terminalReauths == ["gmail|work"])
+        guard case .running(let command) = model.terminalFlow?.step else { return #expect(Bool(false)) }
+        #expect(command.arguments == ["profile", "reauth", "gmail", "work"])
     }
 
     @Test func reauthNamesTheServiceAsThePageShowsIt() async {
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
         await model.openRemoteVault()
         model.reauthProfile(service: "gmail", profile: "x", displayName: "Gmail")
-        #expect(model.addFlow?.displayName == "Gmail")
+        #expect(model.terminalFlow?.displayName == "Gmail")
     }
 
     @Test func reauthOnALocalVaultDoesNothing() async {
         await model.openLocalVault()
         #expect(model.screen == .vault)
         model.reauthProfile(service: "gmail", profile: "work")
-        #expect(model.addFlow == nil)
+        #expect(model.terminalFlow == nil)
     }
 
     @Test(arguments: ["", "-x", "--json", "a\nb", String(repeating: "a", count: 201)])
@@ -231,45 +163,57 @@ struct CompanionModelTests {
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
         await model.openRemoteVault()
         model.reauthProfile(service: "gmail", profile: name)
-        #expect(model.addFlow == nil)
+        #expect(model.terminalFlow == nil)
+        #expect(backend.terminalReauths.isEmpty)
+    }
+
+    @Test func reauthOfAServiceThatIsNotOneFailsInTheSheet() async {
+        backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
+        await model.openRemoteVault()
+        model.reauthProfile(service: "-rf", profile: "work")
+        #expect(model.terminalFlow?.step == .failed("Not a service: -rf"))
+        model.terminalFlow?.exited(0)
+        #expect(model.pageNotice == nil)
     }
 
     @Test func oneSheetAtATimeAcrossAddAndReauth() async {
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
         await model.openRemoteVault()
         model.addProfile(service: "kite", displayName: "Kite")
-        let add = model.addFlow
+        let add = model.terminalFlow
         model.reauthProfile(service: "gmail", profile: "work")
-        #expect(model.addFlow === add)
-        model.closeAddFlow()
+        #expect(model.terminalFlow === add)
+        #expect(backend.terminalReauths.isEmpty)
+        model.closeTerminalFlow()
         model.reauthProfile(service: "gmail", profile: "work")
-        let reauth = model.addFlow
+        let reauth = model.terminalFlow
         #expect(reauth?.purpose == .reauth(profile: "work"))
         model.addProfile(service: "kite", displayName: "Kite")
         model.reauthProfile(service: "gmail", profile: "other")
-        #expect(model.addFlow === reauth)
+        #expect(model.terminalFlow === reauth)
+        #expect(backend.terminalReauths == ["gmail|work"])
     }
 
-    @Test func aSignInAgainIsANoticeForThePage() async throws {
+    @Test func aSignInAgainIsANoticeForThePageWithItsProfile() async throws {
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
         await model.openRemoteVault()
         model.reauthProfile(service: "gmail", profile: "work")
-        model.addFlow?.submit()
-        #expect(backend.startedReauths == ["gmail|work"])
-        try #require(backend.addRuns.first).finish(.success("work"))
-        await eventually { model.pageNotice?.profile == "work" }
+        model.terminalFlow?.exited(0)
         #expect(model.pageNotice?.service == "gmail")
+        #expect(model.pageNotice?.profile == "work")
     }
 
     @Test func switchingVaultCancelsASignInAgain() async throws {
         backend.vaultStateResult = .success(.remote(hub: "https://h.example", canManageProfiles: true))
         await model.openRemoteVault()
         model.reauthProfile(service: "gmail", profile: "work")
-        model.addFlow?.submit()
-        let run = try #require(backend.addRuns.first)
+        let flow = try #require(model.terminalFlow)
+        var stops = 0
+        flow.attach { stops += 1 }
         await model.switchVault()
-        #expect(run.cancelled)
-        #expect(model.addFlow == nil)
+        #expect(stops == 1)
+        #expect(model.terminalFlow == nil)
+        flow.exited(0)
         #expect(model.pageNotice == nil)
     }
 
