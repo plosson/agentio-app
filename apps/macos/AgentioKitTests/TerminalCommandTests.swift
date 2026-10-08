@@ -23,6 +23,22 @@ struct TerminalCommandTests {
         }
     }
 
+    @Test func signingInAgainRunsProfileReauthWithTheServiceAndTheName() throws {
+        let command = try cli.terminalProfileReauth("gcal", profile: "pa@example.com")
+        #expect(command.executable.path == "/tmp/x y/cli/bin/agentio")
+        #expect(command.arguments == ["profile", "reauth", "gcal", "pa@example.com"])
+        #expect(command.environment == (try cli.terminalProfileAdd("gcal", readOnly: false)).environment)
+    }
+
+    @Test func signingInAgainRefusesAServiceOrANameThatCouldBeReadAsSomethingElse() {
+        for bad in ["", "-h", "--json", "gcal profile", "gcal\n"] {
+            #expect(throws: invalidService(bad), "service: \(bad)") { try cli.terminalProfileReauth(bad, profile: "work") }
+        }
+        for bad in ["", "-x", "--json", "a\nb", String(repeating: "a", count: 201)] {
+            #expect(throws: AgentioError.self, "profile: \(bad)") { try cli.terminalProfileReauth("gcal", profile: bad) }
+        }
+    }
+
     @Test func theUsersAgentioSettingsAndForcedColourDoNotReachTheTerminal() throws {
         let env = try cli.terminalProfileAdd("gcal", readOnly: false).environment
         #expect(env["AGENTIO_TOKEN"] == nil)
@@ -38,7 +54,7 @@ struct TerminalCommandTests {
         #expect(env["TERM"] == "xterm-256color")
     }
 
-    @Test func theFormsEnvironmentIsUnchanged() {
+    @Test func thePipedEnvironmentStaysPlain() {
         // The pipes the app reads still need plain text.
         let loc = CliLocation(root: URL(filePath: "/tmp/c"))
         #expect(cliEnv(loc, base: [:])["NO_COLOR"] == "1")

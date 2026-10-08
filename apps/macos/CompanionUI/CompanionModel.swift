@@ -107,11 +107,9 @@ public final class CompanionModel {
     /// in again when it is false.
     public private(set) var canManageProfiles: Bool?
 
-    /// The add-profile (or sign-in-again) sheet; nil when none is open.
-    public private(set) var addFlow: AddProfileFlow?
-    /// The add-in-a-terminal sheet; nil when none is open.
+    /// The add (or sign-in-again) sheet, with its terminal; nil when none is open.
     public private(set) var terminalFlow: TerminalFlow?
-    /// The last profile added, for the page to pick up.
+    /// The last profile added or signed in again, for the page to pick up.
     public private(set) var pageNotice: PageNotice?
 
     private let backend: any CompanionBackend
@@ -134,8 +132,6 @@ public final class CompanionModel {
     private var downloadFrom: Screen?
     /// The hub page the "All set" screen opens.
     private var pendingPage: String?
-    /// Loading the add sheet; stopped with the sheet.
-    private var addFlowStart: Task<Void, Never>?
     /// The source folder the app runs instead of its own CLI (`devAgentioRepo`), as read at launch.
     private let devAgentioRepo: URL?
     /// The last update check's answer; it counts only while its `current` is the CLI's version.
@@ -571,7 +567,6 @@ public final class CompanionModel {
 
     /// Back to the app's own screens (the local daemon, if any, keeps running).
     public func switchVault() async {
-        closeAddFlow()
         closeTerminalFlow()
         vaultPage = nil
         await enterMode()
@@ -580,7 +575,6 @@ public final class CompanionModel {
     /// The hub's page asked for a key that may manage profiles: sign in to
     /// the same hub again, from the app's own screens. Only for a remote vault.
     public func signInAgain() async {
-        closeAddFlow()
         closeTerminalFlow()
         guard screen == .vault, hubURL != daemon?.url.absoluteString else { return }
         vaultPage = nil
@@ -593,43 +587,27 @@ public final class CompanionModel {
     /// The hub page asked to add `service`. Only on an open remote vault whose key may manage profiles,
     /// and one at a time.
     public func addProfile(service: String, displayName: String?) {
-        guard settings.setupMode == .terminal else {
-            return openFlow(service: service, displayName: displayName ?? service, purpose: .add)
-        }
-        guard canOpenSheet else { return }
-        terminalFlow = TerminalFlow(service: service, displayName: displayName ?? service, backend: backend) { [weak self] service in
-            self?.pageNotice = PageNotice(id: UUID(), service: service, profile: nil)
-        }
+        openTerminal(service: service, displayName: displayName, purpose: .add)
     }
 
     /// The hub page asked to sign `profile` of `service` in again. Same conditions as `addProfile`,
     /// and the name must be one.
     public func reauthProfile(service: String, profile: String, displayName: String? = nil) {
         guard isProfileName(profile) else { return }
-        openFlow(service: service, displayName: displayName ?? service, purpose: .reauth(profile: profile))
+        openTerminal(service: service, displayName: displayName, purpose: .reauth(profile: profile))
     }
 
-    private func openFlow(service: String, displayName: String, purpose: AddProfileFlow.Purpose) {
+    private func openTerminal(service: String, displayName: String?, purpose: TerminalFlow.Purpose) {
         guard canOpenSheet else { return }
-        let flow = AddProfileFlow(service: service, displayName: displayName, purpose: purpose, backend: backend,
-                                  openURL: openURL) { [weak self] service, profile in
+        terminalFlow = TerminalFlow(service: service, displayName: displayName ?? service, purpose: purpose,
+                                    backend: backend) { [weak self] service, profile in
             self?.pageNotice = PageNotice(id: UUID(), service: service, profile: profile)
         }
-        addFlow = flow
-        addFlowStart = Task { await flow.start() }
     }
 
     /// One sheet at a time, only on an open remote vault whose key may manage profiles.
     private var canOpenSheet: Bool {
-        screen == .vault && hubURL != daemon?.url.absoluteString && canManageProfiles == true && addFlow == nil && terminalFlow == nil
-    }
-
-    /// Close the sheet; an add still running is stopped.
-    public func closeAddFlow() {
-        addFlowStart?.cancel()
-        addFlowStart = nil
-        addFlow?.cancel()
-        addFlow = nil
+        screen == .vault && hubURL != daemon?.url.absoluteString && canManageProfiles == true && terminalFlow == nil
     }
 
     /// Close the terminal sheet; the sheet's view stops the process.
@@ -641,7 +619,6 @@ public final class CompanionModel {
     /// Before quitting: no sign-in left polling the hub, no download left
     /// running, no daemon left running.
     public func shutdown() async {
-        closeAddFlow()
         closeTerminalFlow()
         abandonLogin()
         downloadTask?.cancel()
