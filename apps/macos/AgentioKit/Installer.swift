@@ -11,8 +11,8 @@ public let minimumHubVersion = CliVersion("3.14.0")!
 /// rename and remove them.
 public let loginScopes = ["profiles:write", "profiles:manage"]
 
-/// The official installer, as documented at https://agentio.houlahop.com/#install.
-public let installScriptURL = URL(string: "https://agentio.houlahop.com/install")!
+/// The official installer, as documented at https://houlahop.com/agentio/#install.
+public let installScriptURL = URL(string: "https://houlahop.com/agentio/install")!
 
 /// An x.y.z version, compared by number ("3.10.0" > "3.9.9"). A pre-release
 /// ("3.13.0-beta.1") comes before its release.
