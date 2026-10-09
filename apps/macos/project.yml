@@ -21,6 +21,8 @@ packages:
     url: https://github.com/migueldeicaza/SwiftTerm
     # 1.19.0 and later run a build plugin that Xcode must be told to trust; 1.18.0 has none.
     exactVersion: "1.18.0"
+  HoulahopUpdater:
+    path: ../../scripts/mac-release
 targets:
   AgentioCompanion:
     type: application
@@ -29,6 +31,7 @@ targets:
     dependencies:
       - target: AgentioKit
       - target: CompanionUI
+      - package: HoulahopUpdater
     info:
       path: AgentioCompanion/Info.plist
       properties:
@@ -40,6 +43,10 @@ targets:
         NSAppTransportSecurity:
           # The local vault's daemon and dev hubs on http://127.0.0.1 / localhost.
           NSAllowsLocalNetworking: true
+        # Sparkle: scripts/release.sh uploads appcast.xml to each GitHub release, so "latest" always points to the newest one.
+        SUFeedURL: https://github.com/plosson/agentio-app/releases/latest/download/appcast.xml
+        SUPublicEDKey: KQGazVBaUgdzNghgMxyqvoRWt5QKunjbDMVLxUXQTK8=
+        SUEnableAutomaticChecks: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.plosson.agentio-companion

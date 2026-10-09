@@ -1,11 +1,13 @@
 import AgentioKit
 import AppKit
 import CompanionUI
+import HoulahopUpdater
 import SwiftUI
 
 @main
 struct AgentioCompanionApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var updater = Updater()
 
     var body: some Scene {
         Window("AgentIO Companion", id: "main") {
@@ -14,7 +16,10 @@ struct AgentioCompanionApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
         .defaultSize(width: 720, height: 640)
-        .commands { VaultCommands(model: appDelegate.model) }
+        .commands {
+            VaultCommands(model: appDelegate.model)
+            CommandGroup(after: .appInfo) { CheckForUpdatesButton(updater: updater) }
+        }
         Settings { SettingsView() }
     }
 }
