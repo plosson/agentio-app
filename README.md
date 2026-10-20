@@ -1,4 +1,4 @@
-# AgentIO Companion
+# AgentIO
 
 Native macOS app (Swift, SwiftUI) for an AgentIO vault: a remote hub or a local vault.
 
@@ -28,7 +28,7 @@ open AgentioCompanion.xcodeproj         # or use the commands below
 
 xcodebuild -scheme AgentioCompanion -destination 'platform=macOS' -derivedDataPath build test
 xcodebuild -scheme AgentioCompanion -configuration Debug -derivedDataPath build build
-open "build/Build/Products/Debug/AgentIO Companion.app"
+open "build/Build/Products/Debug/AgentIO.app"
 ```
 
 Logs: `log stream --predicate 'subsystem == "com.plosson.agentio-companion"'`

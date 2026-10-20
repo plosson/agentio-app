@@ -155,8 +155,8 @@ public final class CompanionModel {
 
     public var windowTitle: String {
         let dev = devAgentioRepo != nil ? " (dev AgentIO)" : ""
-        guard let host = hostLabel(vaultPage) else { return "AgentIO Companion\(dev)" }
-        return "AgentIO Companion — \(host)\(dev)"
+        guard let host = hostLabel(vaultPage) else { return "AgentIO\(dev)" }
+        return "AgentIO — \(host)\(dev)"
     }
 
     /// Nil on the app's own screens.
