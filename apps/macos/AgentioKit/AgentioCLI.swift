@@ -34,7 +34,7 @@ struct CliEvent: @unchecked Sendable {
     }
 }
 
-let unreadableFormat = AgentioError("This agentio prints a JSON format the app cannot read. Update AgentIO Companion.")
+let unreadableFormat = AgentioError("This agentio prints a JSON format the app cannot read. Update the AgentIO app.")
 
 /// One stdout line as an event; nil for anything else (a blank or log line).
 /// Throws for an event in another format version: this app cannot read it.
