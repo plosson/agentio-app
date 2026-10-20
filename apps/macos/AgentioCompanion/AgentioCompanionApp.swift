@@ -42,14 +42,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }()
 
     /// Before any window: drop the old "AgentIO Companion.app" name, and start again from the new one if this copy moved.
+    /// A moved copy exits at once: its window would look for its resources at the old path, and crash.
     func applicationWillFinishLaunching(_ notification: Notification) {
         guard case .renamed(let app) = OldAppName.tidy(bundle: Bundle.main.bundleURL,
                                                        bundleID: Bundle.main.bundleIdentifier ?? "") else { return }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: app, configuration: configuration) { _, _ in
-            DispatchQueue.main.async { NSApp.terminate(nil) }
-        }
+        let launched = DispatchSemaphore(value: 0)
+        // The handler runs on another queue, so waiting here does not block it.
+        NSWorkspace.shared.openApplication(at: app, configuration: configuration) { _, _ in launched.signal() }
+        _ = launched.wait(timeout: .now() + 10)
+        exit(0)
     }
 
     /// One window: closing it quits, like System Settings.
